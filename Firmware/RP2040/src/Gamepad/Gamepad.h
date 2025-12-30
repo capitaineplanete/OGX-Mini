@@ -105,7 +105,12 @@ public:
         int16_t  joystick_rx;
         int16_t  joystick_ry;
         uint8_t  analog[10];
-    
+        // Motion sensors (sixaxis)
+        int16_t  accel_x;
+        int16_t  accel_y;
+        int16_t  accel_z;
+        int16_t  gyro_z;
+
         PadIn()
         {
             std::memset(this, 0, sizeof(PadIn));

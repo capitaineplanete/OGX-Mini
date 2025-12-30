@@ -247,9 +247,15 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
     gp_in.trigger_l = gamepad->scale_trigger_l<10>(static_cast<uint16_t>(uni_gp->brake));
     gp_in.trigger_r = gamepad->scale_trigger_r<10>(static_cast<uint16_t>(uni_gp->throttle));
-    
+
     std::tie(gp_in.joystick_lx, gp_in.joystick_ly) = gamepad->scale_joystick_l<10>(uni_gp->axis_x, uni_gp->axis_y);
     std::tie(gp_in.joystick_rx, gp_in.joystick_ry) = gamepad->scale_joystick_r<10>(uni_gp->axis_rx, uni_gp->axis_ry);
+
+    // Extract motion sensor data (sixaxis) from Bluepad32
+    gp_in.accel_x = uni_gp->accel[0];
+    gp_in.accel_y = uni_gp->accel[1];
+    gp_in.accel_z = uni_gp->accel[2];
+    gp_in.gyro_z = uni_gp->gyro[2];  // PS3 only uses Z-axis rotation
 
     gamepad->set_pad_in(gp_in);
 }

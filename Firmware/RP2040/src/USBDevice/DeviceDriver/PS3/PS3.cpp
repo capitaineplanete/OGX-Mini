@@ -80,6 +80,12 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.joystick_rx = Scale::int16_to_uint8(gp_in.joystick_rx);
         report_in_.joystick_ry = Scale::int16_to_uint8(gp_in.joystick_ry);
 
+        // Populate sixaxis motion sensor data
+        report_in_.acceler_x = static_cast<uint16_t>(gp_in.accel_x);
+        report_in_.acceler_y = static_cast<uint16_t>(gp_in.accel_y);
+        report_in_.acceler_z = static_cast<uint16_t>(gp_in.accel_z);
+        report_in_.gyro_z = static_cast<uint16_t>(gp_in.gyro_z);
+
         if (gamepad.analog_enabled())
         {
             report_in_.up_axis      = gp_in.analog[Gamepad::ANALOG_OFF_UP];
