@@ -86,6 +86,21 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.acceler_z = static_cast<uint16_t>(gp_in.accel_z);
         report_in_.gyro_z = static_cast<uint16_t>(gp_in.gyro_z);
 
+        // Populate battery level (0-255 from controller → 0-100 and state for PS3)
+        uint8_t battery_percent = (gp_in.battery * 100) / 255;
+        report_in_.move_power_status = battery_percent;
+
+        // Map to PS3 power state
+        if (battery_percent > 80) {
+            report_in_.power_status = PS3::PowerState::FULL;
+        } else if (battery_percent > 50) {
+            report_in_.power_status = PS3::PowerState::HIGH;
+        } else if (battery_percent > 20) {
+            report_in_.power_status = PS3::PowerState::DISCHARGING;
+        } else {
+            report_in_.power_status = PS3::PowerState::LOW;
+        }
+
         if (gamepad.analog_enabled())
         {
             report_in_.up_axis      = gp_in.analog[Gamepad::ANALOG_OFF_UP];

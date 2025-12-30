@@ -142,8 +142,21 @@ bool UserSettings::check_for_driver_change(Gamepad& gamepad)
         }
     }
 
-    if (new_driver == DeviceDriverType::NONE || new_driver == current_driver_)
+    if (new_driver == DeviceDriverType::NONE)
     {
+        return false;
+    }
+
+    if (new_driver == current_driver_)
+    {
+        // Mode already active - provide double-blink LED feedback
+        board_api::set_led(false);
+        sleep_ms(100);
+        board_api::set_led(true);
+        sleep_ms(100);
+        board_api::set_led(false);
+        sleep_ms(100);
+        board_api::set_led(true);
         return false;
     }
 

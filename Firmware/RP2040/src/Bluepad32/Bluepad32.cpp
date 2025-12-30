@@ -34,6 +34,27 @@ btstack_timer_source_t led_timer_;
 bool led_timer_set_{false};
 bool feedback_timer_set_{false};
 
+// DS4 Lightbar control settings
+struct LightbarSettings {
+    uint8_t color_index{0};    // Current color (0-7)
+    uint8_t brightness{255};    // Brightness (0-255)
+    bool combo_active{false};   // Whether START+SELECT combo is held
+    uint16_t prev_buttons{0};   // Previous button state for edge detection
+};
+LightbarSettings lightbar_[MAX_GAMEPADS];
+
+// Predefined colors for DS4 lightbar
+static const uint8_t LIGHTBAR_COLORS[8][3] = {
+    {255, 0, 0},    // Red
+    {0, 255, 0},    // Green
+    {0, 0, 255},    // Blue
+    {255, 255, 0},  // Yellow
+    {255, 0, 255},  // Magenta
+    {0, 255, 255},  // Cyan
+    {255, 128, 0},  // Orange
+    {255, 255, 255} // White
+};
+
 bool any_connected()
 {
     for (auto& device : bt_devices_)
@@ -256,6 +277,53 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     gp_in.accel_y = uni_gp->accel[1];
     gp_in.accel_z = uni_gp->accel[2];
     gp_in.gyro_z = uni_gp->gyro[2];  // PS3 only uses Z-axis rotation
+
+    // Extract battery level (0-255, 255 = full)
+    gp_in.battery = controller->battery;
+
+    // DS4 Lightbar control via button combo: START + SELECT + D-Pad
+    // LEFT/RIGHT = change color, UP/DOWN = change brightness
+    if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
+        static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF};
+        LightbarSettings& lb = lightbar_[idx];
+
+        // Detect START + SELECT combo
+        bool combo_held = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->misc_buttons & MISC_BUTTON_BACK);
+
+        if (combo_held) {
+            // Change color with LEFT/RIGHT (on D-pad press, not hold)
+            if (uni_gp->dpad == DPAD_LEFT && prev_dpad[idx] != DPAD_LEFT) {
+                lb.color_index = (lb.color_index == 0) ? 7 : lb.color_index - 1;
+            } else if (uni_gp->dpad == DPAD_RIGHT && prev_dpad[idx] != DPAD_RIGHT) {
+                lb.color_index = (lb.color_index + 1) % 8;
+            }
+
+            // Change brightness with UP/DOWN (on D-pad press, not hold)
+            if (uni_gp->dpad == DPAD_UP && prev_dpad[idx] != DPAD_UP) {
+                lb.brightness = (lb.brightness >= 230) ? 255 : lb.brightness + 25;
+            } else if (uni_gp->dpad == DPAD_DOWN && prev_dpad[idx] != DPAD_DOWN) {
+                lb.brightness = (lb.brightness <= 25) ? 0 : lb.brightness - 25;
+            }
+
+            // Apply lightbar color with brightness
+            uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
+            uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
+            uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
+            device->report_parser.set_lightbar_color(device, r, g, b);
+
+            lb.combo_active = true;
+        } else if (lb.combo_active) {
+            // Combo just released - restore battery-based color
+            lb.combo_active = false;
+            uint8_t battery_pct = (controller->battery * 100) / 255;
+            uint8_t r = (battery_pct < 20) ? 255 : 0;
+            uint8_t g = (battery_pct >= 50) ? 255 : (battery_pct >= 20) ? 128 : 0;
+            uint8_t b = 0;
+            device->report_parser.set_lightbar_color(device, r, g, b);
+        }
+
+        prev_dpad[idx] = uni_gp->dpad;
+    }
 
     gamepad->set_pad_in(gp_in);
 }

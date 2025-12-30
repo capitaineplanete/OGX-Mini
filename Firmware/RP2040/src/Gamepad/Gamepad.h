@@ -110,6 +110,8 @@ public:
         int16_t  accel_y;
         int16_t  accel_z;
         int16_t  gyro_z;
+        // Battery level (0-255, 255 = full)
+        uint8_t  battery;
 
         PadIn()
         {
