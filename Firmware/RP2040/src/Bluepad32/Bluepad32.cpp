@@ -357,21 +357,16 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             device->report_parser.set_lightbar_color(device, r, g, b);
 
             lb.combo_active = true;
-        } else {
-            // Check battery - only override with dim red if critically low
-            uint8_t battery_pct = (controller->battery * 100) / 255;
-            if (battery_pct < 20) {
-                // Dim red warning to save battery
-                device->report_parser.set_lightbar_color(device, 50, 0, 0);
-            } else if (lb.combo_active) {
-                // Combo just released - restore user's custom color
-                lb.combo_active = false;
-                uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
-                uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
-                uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
-                device->report_parser.set_lightbar_color(device, r, g, b);
-            }
+        } else if (lb.combo_active) {
+            // Combo just released - restore user's custom color
+            lb.combo_active = false;
+            uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
+            uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
+            uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
+            device->report_parser.set_lightbar_color(device, r, g, b);
         }
+        // Note: Battery low warning removed - battery status already reported to PS3
+        // User's saved color persists, not overridden by low battery
 
         prev_dpad[idx] = uni_gp->dpad;
     }
