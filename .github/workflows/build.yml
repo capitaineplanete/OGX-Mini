@@ -2,7 +2,7 @@ name: Build OGX-Mini
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "claude/build-alpha4-pico2w-JVyLv" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
