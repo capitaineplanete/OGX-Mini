@@ -312,22 +312,20 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             device->report_parser.set_lightbar_color(device, r, g, b);
 
             lb.combo_active = true;
-        } else if (lb.combo_active) {
-            // Combo just released - restore battery-based color
-            lb.combo_active = false;
+        } else {
+            // Check battery - only override with dim red if critically low
             uint8_t battery_pct = (controller->battery * 100) / 255;
-
-            // Battery color indication:
-            // Green (>50%), Yellow (20-50%), Red (<20%)
-            uint8_t r, g, b;
-            if (battery_pct >= 50) {
-                r = 0; g = 255; b = 0;  // Green
-            } else if (battery_pct >= 20) {
-                r = 255; g = 200; b = 0;  // Yellow
-            } else {
-                r = 255; g = 0; b = 0;  // Red
+            if (battery_pct < 20) {
+                // Dim red warning to save battery
+                device->report_parser.set_lightbar_color(device, 50, 0, 0);
+            } else if (lb.combo_active) {
+                // Combo just released - restore user's custom color
+                lb.combo_active = false;
+                uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
+                uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
+                uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
+                device->report_parser.set_lightbar_color(device, r, g, b);
             }
-            device->report_parser.set_lightbar_color(device, r, g, b);
         }
 
         prev_dpad[idx] = uni_gp->dpad;
