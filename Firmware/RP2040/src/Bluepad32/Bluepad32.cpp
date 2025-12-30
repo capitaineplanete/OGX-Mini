@@ -294,12 +294,29 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
 
-    // Track battery changes to detect charging (simple: only if battery actually increased)
+    // Maintain charging state by tracking battery trend over time (not just one frame)
     static uint8_t prev_battery_global[MAX_GAMEPADS] = {0};
+    static bool charging_state[MAX_GAMEPADS] = {false};
+    static uint32_t last_battery_check[MAX_GAMEPADS] = {0};
+
+    uint32_t now = board_api::ms_since_boot();
     uint8_t battery_pct = (controller->battery * 100) / 255;
-    // Only flag as charging if battery increased by at least 2 units (reduces false positives from noise)
-    gp_in.charging = (controller->battery > prev_battery_global[idx] + 1) && (battery_pct < 100);
-    prev_battery_global[idx] = controller->battery;
+
+    // Check battery trend every 2 seconds to avoid noise and maintain state
+    if (now - last_battery_check[idx] >= 2000) {
+        if (controller->battery > prev_battery_global[idx] + 1) {
+            // Battery increased significantly - charging
+            charging_state[idx] = true;
+        } else if (controller->battery < prev_battery_global[idx]) {
+            // Battery decreased - not charging
+            charging_state[idx] = false;
+        }
+        // If battery same, keep previous charging state
+        prev_battery_global[idx] = controller->battery;
+        last_battery_check[idx] = now;
+    }
+
+    gp_in.charging = charging_state[idx] && (battery_pct < 100);
 
     // DS4 Lightbar control via button combo: START + R2 + D-Pad
     // LEFT/RIGHT = change color, UP/DOWN = change brightness
