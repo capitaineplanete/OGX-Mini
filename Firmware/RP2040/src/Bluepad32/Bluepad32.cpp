@@ -316,9 +316,17 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             // Combo just released - restore battery-based color
             lb.combo_active = false;
             uint8_t battery_pct = (controller->battery * 100) / 255;
-            uint8_t r = (battery_pct < 20) ? 255 : 0;
-            uint8_t g = (battery_pct >= 50) ? 255 : (battery_pct >= 20) ? 128 : 0;
-            uint8_t b = 0;
+
+            // Battery color indication:
+            // Green (>50%), Yellow (20-50%), Red (<20%)
+            uint8_t r, g, b;
+            if (battery_pct >= 50) {
+                r = 0; g = 255; b = 0;  // Green
+            } else if (battery_pct >= 20) {
+                r = 255; g = 200; b = 0;  // Yellow
+            } else {
+                r = 255; g = 0; b = 0;  // Red
+            }
             device->report_parser.set_lightbar_color(device, r, g, b);
         }
 
