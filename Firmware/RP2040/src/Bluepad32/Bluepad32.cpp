@@ -291,32 +291,29 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     gp_in.accel_z = uni_gp->accel[2];
     gp_in.gyro_z = uni_gp->gyro[2];  // PS3 only uses Z-axis rotation
 
-    // Extract battery level (0-255, 255 = full)
-    gp_in.battery = controller->battery;
+    // Extract battery level (0-255, 255 = full) - cache to avoid multiple member accesses
+    uint8_t battery = controller->battery;
+    gp_in.battery = battery;
 
     // Maintain charging state by tracking battery trend over time (not just one frame)
     static uint8_t prev_battery_global[MAX_GAMEPADS] = {0};
     static bool charging_state[MAX_GAMEPADS] = {false};
     static uint32_t last_battery_check[MAX_GAMEPADS] = {0};
 
+    // Only update charging detection every 2 seconds to reduce overhead
     uint32_t now = board_api::ms_since_boot();
-    uint8_t battery_pct = (controller->battery * 100) / 255;
-
-    // Check battery trend every 2 seconds to avoid noise and maintain state
     if (now - last_battery_check[idx] >= 2000) {
-        if (controller->battery > prev_battery_global[idx] + 1) {
-            // Battery increased significantly - charging
+        if (battery > prev_battery_global[idx] + 1) {
             charging_state[idx] = true;
-        } else if (controller->battery < prev_battery_global[idx]) {
-            // Battery decreased - not charging
+        } else if (battery < prev_battery_global[idx]) {
             charging_state[idx] = false;
         }
-        // If battery same, keep previous charging state
-        prev_battery_global[idx] = controller->battery;
+        prev_battery_global[idx] = battery;
         last_battery_check[idx] = now;
     }
 
-    gp_in.charging = charging_state[idx] && (battery_pct < 100);
+    // Set charging flag (use raw value comparison to avoid division)
+    gp_in.charging = charging_state[idx] && (battery < 255);
 
     // DS4 Lightbar control via button combo: START + R2 + D-Pad
     // LEFT/RIGHT = change color, UP/DOWN = change brightness
@@ -324,6 +321,9 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF};
         LightbarSettings& lb = lightbar_[idx];
+
+        // Calculate battery percentage only for DS4 (avoid division for other controllers)
+        uint8_t battery_pct = (battery * 100) / 255;
 
         // Detect START + R2 combo (R2 > 200 = pressed)
         combo_held = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > 200);
