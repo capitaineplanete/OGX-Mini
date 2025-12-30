@@ -106,10 +106,13 @@ public:
         int16_t  joystick_ry;
         uint8_t  analog[10];
         // Motion sensors (sixaxis)
-        int16_t  accel_x;
-        int16_t  accel_y;
-        int16_t  accel_z;
-        int16_t  gyro_z;
+        // Values from Bluepad32 are int32_t:
+        // - Accelerometer: ~16384 units per G (1G gravity ≈ 16384)
+        // - Gyroscope: ~1024 units per degree/second
+        int32_t  accel_x;
+        int32_t  accel_y;
+        int32_t  accel_z;
+        int32_t  gyro_z;
         // Battery level (0-255, 255 = full)
         uint8_t  battery;
 

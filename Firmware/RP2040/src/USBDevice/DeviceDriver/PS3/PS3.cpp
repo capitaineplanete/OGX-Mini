@@ -81,25 +81,46 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.joystick_ry = Scale::int16_to_uint8(gp_in.joystick_ry);
 
         // Populate sixaxis motion sensor data
-        // Convert from int16_t (-32768 to +32767) to PS3's 10-bit format (0-1023, neutral at ~512)
-        // Use simple low-pass filter to smooth out noise
-        static int16_t filtered_accel_x = 0, filtered_accel_y = 0, filtered_accel_z = 0, filtered_gyro_z = 0;
-        constexpr float FILTER_ALPHA = 0.3f;  // Higher = more responsive, lower = smoother
+        // Bluepad32 provides calibrated int32_t values:
+        //   - Accelerometer: ~16384 units per G (1G gravity ≈ 16384)
+        //   - Gyroscope: ~1024 units per degree/second
+        // PS3 expects 10-bit values (0-1023) stored as uint16_t with byte swap:
+        //   - Neutral value: 0xFF01 (little-endian bytes representing ~512 in 10-bit)
+        //   - Accelerometer: 512 ≈ 0G, deviations represent acceleration
+        //   - Gyroscope: 512 = no rotation, deviations represent angular velocity
 
-        filtered_accel_x = filtered_accel_x * (1.0f - FILTER_ALPHA) + gp_in.accel_x * FILTER_ALPHA;
-        filtered_accel_y = filtered_accel_y * (1.0f - FILTER_ALPHA) + gp_in.accel_y * FILTER_ALPHA;
-        filtered_accel_z = filtered_accel_z * (1.0f - FILTER_ALPHA) + gp_in.accel_z * FILTER_ALPHA;
-        filtered_gyro_z = filtered_gyro_z * (1.0f - FILTER_ALPHA) + gp_in.gyro_z * FILTER_ALPHA;
+        auto convert_accel = [](int32_t value) -> uint16_t {
+            // Convert from Bluepad32 (16384 units/G) to PS3 10-bit (512 units/G)
+            // Formula: ps3_value = (bluepad32_value / 32) + 512
+            // Clamp to 0-1023 range
+            int32_t ps3_value = (value / 32) + 512;
+            if (ps3_value < 0) ps3_value = 0;
+            if (ps3_value > 1023) ps3_value = 1023;
 
-        auto convert_motion = [](int16_t value) -> uint16_t {
-            // Scale from int16_t range to 10-bit range and offset to center at 512
-            return static_cast<uint16_t>(((static_cast<int32_t>(value) + 32768) * 1024) / 65536);
+            // PS3 expects byte-swapped 10-bit value (0x01FF for neutral 511)
+            // Swap bytes: value 512 (0x0200) becomes 0x0002
+            uint16_t swapped = ((ps3_value & 0xFF) << 8) | ((ps3_value >> 8) & 0xFF);
+            return swapped;
         };
 
-        report_in_.acceler_x = convert_motion(filtered_accel_x);
-        report_in_.acceler_y = convert_motion(filtered_accel_y);
-        report_in_.acceler_z = convert_motion(filtered_accel_z);
-        report_in_.gyro_z = convert_motion(filtered_gyro_z);
+        auto convert_gyro = [](int32_t value) -> uint16_t {
+            // Convert from Bluepad32 (1024 units/deg/s) to PS3 10-bit
+            // PS3 sixaxis has range of about ±200 deg/s mapped to 0-1023
+            // Formula: ps3_value = (bluepad32_value / 400) + 512
+            // Clamp to 0-1023 range
+            int32_t ps3_value = (value / 400) + 512;
+            if (ps3_value < 0) ps3_value = 0;
+            if (ps3_value > 1023) ps3_value = 1023;
+
+            // Byte swap for PS3 format
+            uint16_t swapped = ((ps3_value & 0xFF) << 8) | ((ps3_value >> 8) & 0xFF);
+            return swapped;
+        };
+
+        report_in_.acceler_x = convert_accel(gp_in.accel_x);
+        report_in_.acceler_y = convert_accel(gp_in.accel_y);
+        report_in_.acceler_z = convert_accel(gp_in.accel_z);
+        report_in_.gyro_z = convert_gyro(gp_in.gyro_z);
 
         // Populate battery level (0-255 from controller → 0-100 and state for PS3)
         uint8_t battery_percent = (gp_in.battery * 100) / 255;
