@@ -36,8 +36,8 @@ bool feedback_timer_set_{false};
 
 // DS4 Lightbar control settings
 struct LightbarSettings {
-    uint8_t color_index{0};    // Current color (0-7)
-    uint8_t brightness{255};    // Brightness (0-255)
+    uint8_t color_index{7};    // Current color (0-7), default: White
+    uint8_t brightness{128};    // Brightness (0-255), default: Half brightness
     bool combo_active{false};   // Whether START+SELECT combo is held
     uint16_t prev_buttons{0};   // Previous button state for edge detection
 };
