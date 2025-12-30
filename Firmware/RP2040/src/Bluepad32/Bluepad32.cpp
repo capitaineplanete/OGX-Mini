@@ -294,12 +294,17 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
 
+    // Track battery changes to detect charging
+    static uint8_t prev_battery_global[MAX_GAMEPADS] = {0};
+    uint8_t battery_pct = (controller->battery * 100) / 255;
+    gp_in.charging = (controller->battery > prev_battery_global[idx]) && (battery_pct < 100);
+    prev_battery_global[idx] = controller->battery;
+
     // DS4 Lightbar control via button combo: START + R2 + D-Pad
     // LEFT/RIGHT = change color, UP/DOWN = change brightness
     bool combo_held = false;
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF};
-        static uint8_t prev_battery[MAX_GAMEPADS] = {0};
         LightbarSettings& lb = lightbar_[idx];
 
         // Detect START + R2 combo (R2 > 200 = pressed)
@@ -328,14 +333,11 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
             lb.combo_active = true;
         } else {
-            // Battery-based color indicators
-            uint8_t battery_pct = (controller->battery * 100) / 255;
-            bool is_charging = (controller->battery > prev_battery[idx]) && (battery_pct < 100);
-
+            // Battery-based color indicators (use gp_in.charging from global tracking)
             if (battery_pct < 20) {
                 // Dim red warning for low battery (reduced brightness)
                 device->report_parser.set_lightbar_color(device, 30, 0, 0);
-            } else if (is_charging || battery_pct >= 98) {
+            } else if (gp_in.charging || battery_pct >= 98) {
                 // Dim orange for charging/nearly full (low brightness to avoid annoyance)
                 device->report_parser.set_lightbar_color(device, 40, 20, 0);
             } else if (lb.combo_active) {
@@ -349,7 +351,6 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
         }
 
         prev_dpad[idx] = uni_gp->dpad;
-        prev_battery[idx] = controller->battery;
     }
 
     // Block combo buttons from being sent to PS3/console when lightbar combo is active

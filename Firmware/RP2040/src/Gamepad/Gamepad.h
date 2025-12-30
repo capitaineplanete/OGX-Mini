@@ -112,6 +112,8 @@ public:
         int16_t  gyro_z;
         // Battery level (0-255, 255 = full)
         uint8_t  battery;
+        // Charging status (true if controller is charging)
+        bool     charging;
 
         PadIn()
         {
