@@ -81,10 +81,16 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.joystick_ry = Scale::int16_to_uint8(gp_in.joystick_ry);
 
         // Populate sixaxis motion sensor data
-        report_in_.acceler_x = static_cast<uint16_t>(gp_in.accel_x);
-        report_in_.acceler_y = static_cast<uint16_t>(gp_in.accel_y);
-        report_in_.acceler_z = static_cast<uint16_t>(gp_in.accel_z);
-        report_in_.gyro_z = static_cast<uint16_t>(gp_in.gyro_z);
+        // Convert from int16_t (-32768 to +32767) to PS3's 10-bit format (0-1023, neutral at ~512)
+        auto convert_motion = [](int16_t value) -> uint16_t {
+            // Scale from int16_t range to 10-bit range and offset to center at 512
+            return static_cast<uint16_t>(((static_cast<int32_t>(value) + 32768) * 1024) / 65536);
+        };
+
+        report_in_.acceler_x = convert_motion(gp_in.accel_x);
+        report_in_.acceler_y = convert_motion(gp_in.accel_y);
+        report_in_.acceler_z = convert_motion(gp_in.accel_z);
+        report_in_.gyro_z = convert_motion(gp_in.gyro_z);
 
         // Populate battery level (0-255 from controller → 0-100 and state for PS3)
         uint8_t battery_percent = (gp_in.battery * 100) / 255;
