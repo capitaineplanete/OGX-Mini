@@ -294,10 +294,11 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
 
-    // Track battery changes to detect charging
+    // Track battery changes to detect charging (simple: only if battery actually increased)
     static uint8_t prev_battery_global[MAX_GAMEPADS] = {0};
     uint8_t battery_pct = (controller->battery * 100) / 255;
-    gp_in.charging = (controller->battery > prev_battery_global[idx]) && (battery_pct < 100);
+    // Only flag as charging if battery increased by at least 2 units (reduces false positives from noise)
+    gp_in.charging = (controller->battery > prev_battery_global[idx] + 1) && (battery_pct < 100);
     prev_battery_global[idx] = controller->battery;
 
     // DS4 Lightbar control via button combo: START + R2 + D-Pad
@@ -333,12 +334,12 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
             lb.combo_active = true;
         } else {
-            // Battery-based color indicators (use gp_in.charging from global tracking)
+            // Battery-based color indicators
             if (battery_pct < 20) {
-                // Dim red warning for low battery (reduced brightness)
+                // Dim red warning for low battery
                 device->report_parser.set_lightbar_color(device, 30, 0, 0);
-            } else if (gp_in.charging || battery_pct >= 98) {
-                // Dim orange for charging/nearly full (low brightness to avoid annoyance)
+            } else if (gp_in.charging) {
+                // Dim orange ONLY when actually charging (battery increasing)
                 device->report_parser.set_lightbar_color(device, 40, 20, 0);
             } else if (lb.combo_active) {
                 // Combo just released - restore user's custom color
