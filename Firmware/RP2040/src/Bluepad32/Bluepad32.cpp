@@ -186,15 +186,7 @@ static void device_connected_cb(uni_hid_device_t* device) {
         return;
     }
 
-    // Load and restore saved lightbar color for DS4 on reconnect
-    if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
-        LightbarSettings& lb = lightbar_[idx];
-        lb.load_from_flash(idx);  // Load saved color from flash
-        uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
-        uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
-        uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
-        device->report_parser.set_lightbar_color(device, r, g, b);
-    }
+    // Lightbar restoration moved to device_ready_cb to ensure device is fully initialized
 }
 
 static void device_disconnected_cb(uni_hid_device_t* device) {
@@ -211,26 +203,41 @@ static void device_disconnected_cb(uni_hid_device_t* device) {
     bt_devices_[idx].connected = false;
     bt_devices_[idx].gamepad->reset_pad_in();
 
-    if (!led_timer_set_ && !any_connected()) {
-        led_timer_set_ = true;
-        led_timer_.process = check_led_cb;
-        led_timer_.context = nullptr;
-        btstack_run_loop_set_timer(&led_timer_, LED_CHECK_TIME_MS);
-        btstack_run_loop_add_timer(&led_timer_);
-    }
-    if (feedback_timer_set_ && !any_connected()) {
-        feedback_timer_set_ = false;
-        btstack_run_loop_remove_timer(&feedback_timer_);
+    // Re-enable new connections when all devices disconnect to allow reconnection
+    if (!any_connected()) {
+        uni_bt_enable_new_connections_unsafe(true);
+
+        if (!led_timer_set_) {
+            led_timer_set_ = true;
+            led_timer_.process = check_led_cb;
+            led_timer_.context = nullptr;
+            btstack_run_loop_set_timer(&led_timer_, LED_CHECK_TIME_MS);
+            btstack_run_loop_add_timer(&led_timer_);
+        }
+        if (feedback_timer_set_) {
+            feedback_timer_set_ = false;
+            btstack_run_loop_remove_timer(&feedback_timer_);
+        }
     }
 }
 
-static uni_error_t device_ready_cb(uni_hid_device_t* device) {    
+static uni_error_t device_ready_cb(uni_hid_device_t* device) {
     int idx = uni_hid_device_get_idx_for_instance(device);
     if (idx >= MAX_GAMEPADS || idx < 0) {
         return UNI_ERROR_SUCCESS;
     }
 
     bt_devices_[idx].connected = true;
+
+    // Load and restore saved lightbar color for DS4 when device is fully ready
+    if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
+        LightbarSettings& lb = lightbar_[idx];
+        lb.load_from_flash(idx);  // Load saved color from flash
+        uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
+        uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
+        uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
+        device->report_parser.set_lightbar_color(device, r, g, b);
+    }
 
     if (led_timer_set_) {
         led_timer_set_ = false;
