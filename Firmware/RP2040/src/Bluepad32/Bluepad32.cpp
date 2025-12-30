@@ -37,15 +37,19 @@ bool feedback_timer_set_{false};
 
 // DS4 Lightbar control settings
 struct LightbarSettings {
-    uint8_t color_index{0};    // Current color (0-7)
+    uint8_t color_index{0};     // Current color (0-7)
     uint8_t brightness{255};    // Brightness (0-255)
     bool combo_active{false};   // Whether START+R2 combo is held
     uint16_t prev_buttons{0};   // Previous button state for edge detection
+    bool dirty{false};          // True if settings changed and need saving
 
-    // Save to flash storage (NVS)
+    // Save to flash storage (NVS) - should only be called infrequently (e.g., on disconnect)
     void save_to_flash(int idx) {
+        if (!dirty) return;  // Skip if no changes
         struct SaveData { uint8_t color_index; uint8_t brightness; } data{color_index, brightness};
-        NVSTool::get_instance().write("lb_" + std::to_string(idx), &data, sizeof(data));
+        if (NVSTool::get_instance().write("lb_" + std::to_string(idx), &data, sizeof(data))) {
+            dirty = false;  // Clear dirty flag on successful save
+        }
     }
 
     // Load from flash storage (NVS)
@@ -54,6 +58,7 @@ struct LightbarSettings {
         if (NVSTool::get_instance().read("lb_" + std::to_string(idx), &data, sizeof(data))) {
             color_index = data.color_index;
             brightness = data.brightness;
+            dirty = false;  // Loaded from flash, not dirty
         }
     }
 };
@@ -198,6 +203,11 @@ static void device_disconnected_cb(uni_hid_device_t* device) {
         return;
     }
 
+    // Save DS4 lightbar settings to flash on disconnect (if changed)
+    if (device->controller_type == CONTROLLER_TYPE_PS4Controller) {
+        lightbar_[idx].save_to_flash(idx);
+    }
+
     bt_devices_[idx].connected = false;
     bt_devices_[idx].gamepad->reset_pad_in();
 
@@ -321,24 +331,22 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
         bool combo_held = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > 200);
 
         if (combo_held) {
-            bool settings_changed = false;
-
             // Change color with LEFT/RIGHT (on D-pad press, not hold)
             if (uni_gp->dpad == DPAD_LEFT && prev_dpad[idx] != DPAD_LEFT) {
                 lb.color_index = (lb.color_index == 0) ? 7 : lb.color_index - 1;
-                settings_changed = true;
+                lb.dirty = true;  // Mark as needing save
             } else if (uni_gp->dpad == DPAD_RIGHT && prev_dpad[idx] != DPAD_RIGHT) {
                 lb.color_index = (lb.color_index + 1) % 8;
-                settings_changed = true;
+                lb.dirty = true;  // Mark as needing save
             }
 
             // Change brightness with UP/DOWN (on D-pad press, not hold)
             if (uni_gp->dpad == DPAD_UP && prev_dpad[idx] != DPAD_UP) {
                 lb.brightness = (lb.brightness >= 230) ? 255 : lb.brightness + 25;
-                settings_changed = true;
+                lb.dirty = true;  // Mark as needing save
             } else if (uni_gp->dpad == DPAD_DOWN && prev_dpad[idx] != DPAD_DOWN) {
                 lb.brightness = (lb.brightness <= 25) ? 0 : lb.brightness - 25;
-                settings_changed = true;
+                lb.dirty = true;  // Mark as needing save
             }
 
             // Apply lightbar color with brightness
@@ -346,11 +354,6 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
             uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
             device->report_parser.set_lightbar_color(device, r, g, b);
-
-            // Save to flash when settings change
-            if (settings_changed) {
-                lb.save_to_flash(idx);
-            }
 
             lb.combo_active = true;
         } else {

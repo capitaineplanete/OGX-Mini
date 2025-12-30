@@ -84,37 +84,37 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         // Bluepad32 provides calibrated int32_t values:
         //   - Accelerometer: ~16384 units per G (1G gravity ≈ 16384)
         //   - Gyroscope: ~1024 units per degree/second
-        // PS3 expects 10-bit values (0-1023) stored as uint16_t with byte swap:
-        //   - Neutral value: 0xFF01 (little-endian bytes representing ~512 in 10-bit)
-        //   - Accelerometer: 512 ≈ 0G, deviations represent acceleration
-        //   - Gyroscope: 512 = no rotation, deviations represent angular velocity
+        // PS3 expects values in 10-bit range (0-1023) stored as uint16_t
+        //   - Accelerometer: Neutral ≈ 512, represents 0G + gravity offset per axis
+        //   - Gyroscope: Neutral = 512, deviations represent angular velocity
+        //
+        // Note: Removed byte swapping - testing direct 10-bit values
 
         auto convert_accel = [](int32_t value) -> uint16_t {
-            // Convert from Bluepad32 (16384 units/G) to PS3 10-bit (512 units/G)
+            // Convert from Bluepad32 (16384 units/G) to PS3 10-bit
+            // Scale: 16384 units/G → ~512 units/G for 10-bit range
             // Formula: ps3_value = (bluepad32_value / 32) + 512
-            // Clamp to 0-1023 range
             int32_t ps3_value = (value / 32) + 512;
+
+            // Clamp to 10-bit range
             if (ps3_value < 0) ps3_value = 0;
             if (ps3_value > 1023) ps3_value = 1023;
 
-            // PS3 expects byte-swapped 10-bit value (0x01FF for neutral 511)
-            // Swap bytes: value 512 (0x0200) becomes 0x0002
-            uint16_t swapped = ((ps3_value & 0xFF) << 8) | ((ps3_value >> 8) & 0xFF);
-            return swapped;
+            return static_cast<uint16_t>(ps3_value);
         };
 
         auto convert_gyro = [](int32_t value) -> uint16_t {
             // Convert from Bluepad32 (1024 units/deg/s) to PS3 10-bit
-            // PS3 sixaxis has range of about ±200 deg/s mapped to 0-1023
-            // Formula: ps3_value = (bluepad32_value / 400) + 512
-            // Clamp to 0-1023 range
+            // PS3 sixaxis typical range: ±200 deg/s → ±512 units
+            // Formula: ps3_value = (bluepad32_value * 512 / 200 / 1024) + 512
+            //        = (bluepad32_value / 400) + 512
             int32_t ps3_value = (value / 400) + 512;
+
+            // Clamp to 10-bit range
             if (ps3_value < 0) ps3_value = 0;
             if (ps3_value > 1023) ps3_value = 1023;
 
-            // Byte swap for PS3 format
-            uint16_t swapped = ((ps3_value & 0xFF) << 8) | ((ps3_value >> 8) & 0xFF);
-            return swapped;
+            return static_cast<uint16_t>(ps3_value);
         };
 
         report_in_.acceler_x = convert_accel(gp_in.accel_x);
