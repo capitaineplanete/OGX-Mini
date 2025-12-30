@@ -83,6 +83,11 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         // Populate sixaxis motion sensor data
         // Convert from int16_t (-32768 to +32767) to PS3's 10-bit format (0-1023, neutral at ~512)
         auto convert_motion = [](int16_t value) -> uint16_t {
+            // Apply deadzone to filter noise (ignore small movements)
+            constexpr int16_t DEADZONE = 2000;
+            if (value > -DEADZONE && value < DEADZONE) {
+                value = 0;  // Force to neutral if within deadzone
+            }
             // Scale from int16_t range to 10-bit range and offset to center at 512
             return static_cast<uint16_t>(((static_cast<int32_t>(value) + 32768) * 1024) / 65536);
         };
