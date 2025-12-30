@@ -71,10 +71,50 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         if (gp_in.trigger_l) report_in_.buttons[1] |= PS3::Buttons1::L2;
         if (gp_in.trigger_r) report_in_.buttons[1] |= PS3::Buttons1::R2;
 
+        // Populate analog trigger axes for pressure-sensitive games
+        report_in_.l2_axis = gp_in.trigger_l;
+        report_in_.r2_axis = gp_in.trigger_r;
+
         report_in_.joystick_lx = Scale::int16_to_uint8(gp_in.joystick_lx);
         report_in_.joystick_ly = Scale::int16_to_uint8(gp_in.joystick_ly);
         report_in_.joystick_rx = Scale::int16_to_uint8(gp_in.joystick_rx);
         report_in_.joystick_ry = Scale::int16_to_uint8(gp_in.joystick_ry);
+
+        // Populate sixaxis motion sensor data
+        // Convert from int16_t (-32768 to +32767) to PS3's 10-bit format (0-1023, neutral at ~512)
+        // Use simple low-pass filter to smooth out noise
+        static int16_t filtered_accel_x = 0, filtered_accel_y = 0, filtered_accel_z = 0, filtered_gyro_z = 0;
+        constexpr float FILTER_ALPHA = 0.3f;  // Higher = more responsive, lower = smoother
+
+        filtered_accel_x = filtered_accel_x * (1.0f - FILTER_ALPHA) + gp_in.accel_x * FILTER_ALPHA;
+        filtered_accel_y = filtered_accel_y * (1.0f - FILTER_ALPHA) + gp_in.accel_y * FILTER_ALPHA;
+        filtered_accel_z = filtered_accel_z * (1.0f - FILTER_ALPHA) + gp_in.accel_z * FILTER_ALPHA;
+        filtered_gyro_z = filtered_gyro_z * (1.0f - FILTER_ALPHA) + gp_in.gyro_z * FILTER_ALPHA;
+
+        auto convert_motion = [](int16_t value) -> uint16_t {
+            // Scale from int16_t range to 10-bit range and offset to center at 512
+            return static_cast<uint16_t>(((static_cast<int32_t>(value) + 32768) * 1024) / 65536);
+        };
+
+        report_in_.acceler_x = convert_motion(filtered_accel_x);
+        report_in_.acceler_y = convert_motion(filtered_accel_y);
+        report_in_.acceler_z = convert_motion(filtered_accel_z);
+        report_in_.gyro_z = convert_motion(filtered_gyro_z);
+
+        // Populate battery level (0-255 from controller → 0-100 and state for PS3)
+        uint8_t battery_percent = (gp_in.battery * 100) / 255;
+        report_in_.move_power_status = battery_percent;
+
+        // Map to PS3 power state
+        if (battery_percent > 80) {
+            report_in_.power_status = PS3::PowerState::FULL;
+        } else if (battery_percent > 50) {
+            report_in_.power_status = PS3::PowerState::HIGH;
+        } else if (battery_percent > 20) {
+            report_in_.power_status = PS3::PowerState::DISCHARGING;
+        } else {
+            report_in_.power_status = PS3::PowerState::LOW;
+        }
 
         if (gamepad.analog_enabled())
         {
