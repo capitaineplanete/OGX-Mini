@@ -71,6 +71,10 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         if (gp_in.trigger_l) report_in_.buttons[1] |= PS3::Buttons1::L2;
         if (gp_in.trigger_r) report_in_.buttons[1] |= PS3::Buttons1::R2;
 
+        // Populate analog trigger axes for pressure-sensitive games
+        report_in_.l2_axis = gp_in.trigger_l;
+        report_in_.r2_axis = gp_in.trigger_r;
+
         report_in_.joystick_lx = Scale::int16_to_uint8(gp_in.joystick_lx);
         report_in_.joystick_ly = Scale::int16_to_uint8(gp_in.joystick_ly);
         report_in_.joystick_rx = Scale::int16_to_uint8(gp_in.joystick_rx);
