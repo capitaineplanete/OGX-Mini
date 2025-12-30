@@ -80,48 +80,6 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.joystick_rx = Scale::int16_to_uint8(gp_in.joystick_rx);
         report_in_.joystick_ry = Scale::int16_to_uint8(gp_in.joystick_ry);
 
-        // Populate sixaxis motion sensor data
-        // Bluepad32 provides calibrated int32_t values:
-        //   - Accelerometer: ~16384 units per G (1G gravity ≈ 16384)
-        //   - Gyroscope: ~1024 units per degree/second
-        // PS3 expects values in 10-bit range (0-1023) stored as uint16_t
-        //   - Accelerometer: Neutral ≈ 512, represents 0G + gravity offset per axis
-        //   - Gyroscope: Neutral = 512, deviations represent angular velocity
-        //
-        // Note: Removed byte swapping - testing direct 10-bit values
-
-        auto convert_accel = [](int32_t value) -> uint16_t {
-            // Convert from Bluepad32 (16384 units/G) to PS3 10-bit
-            // Scale: 16384 units/G → ~512 units/G for 10-bit range
-            // Formula: ps3_value = (bluepad32_value / 32) + 512
-            int32_t ps3_value = (value / 32) + 512;
-
-            // Clamp to 10-bit range
-            if (ps3_value < 0) ps3_value = 0;
-            if (ps3_value > 1023) ps3_value = 1023;
-
-            return static_cast<uint16_t>(ps3_value);
-        };
-
-        auto convert_gyro = [](int32_t value) -> uint16_t {
-            // Convert from Bluepad32 (1024 units/deg/s) to PS3 10-bit
-            // PS3 sixaxis typical range: ±200 deg/s → ±512 units
-            // Formula: ps3_value = (bluepad32_value * 512 / 200 / 1024) + 512
-            //        = (bluepad32_value / 400) + 512
-            int32_t ps3_value = (value / 400) + 512;
-
-            // Clamp to 10-bit range
-            if (ps3_value < 0) ps3_value = 0;
-            if (ps3_value > 1023) ps3_value = 1023;
-
-            return static_cast<uint16_t>(ps3_value);
-        };
-
-        report_in_.acceler_x = convert_accel(gp_in.accel_x);
-        report_in_.acceler_y = convert_accel(gp_in.accel_y);
-        report_in_.acceler_z = convert_accel(gp_in.accel_z);
-        report_in_.gyro_z = convert_gyro(gp_in.gyro_z);
-
         // Populate battery level (0-255 from controller → 0-100 and state for PS3)
         uint8_t battery_percent = (gp_in.battery * 100) / 255;
         report_in_.move_power_status = battery_percent;
