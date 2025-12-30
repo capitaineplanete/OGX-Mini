@@ -105,8 +105,10 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         uint8_t battery_percent = (gp_in.battery * 100) / 255;
         report_in_.move_power_status = battery_percent;
 
-        // Map to PS3 power state
-        if (battery_percent > 80) {
+        // Map to PS3 power state (prioritize charging status if controller is charging)
+        if (gp_in.is_charging) {
+            report_in_.power_status = PS3::PowerState::CHARGING;
+        } else if (battery_percent > 80) {
             report_in_.power_status = PS3::PowerState::FULL;
         } else if (battery_percent > 50) {
             report_in_.power_status = PS3::PowerState::HIGH;

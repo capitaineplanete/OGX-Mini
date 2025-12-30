@@ -47,9 +47,13 @@ struct UserProfile
     uint8_t analog_off_lb;
     uint8_t analog_off_rb;
 
+    // DS4 Lightbar persistence
+    uint8_t lightbar_color_index;
+    uint8_t lightbar_brightness;
+
     UserProfile();
 };
-static_assert(sizeof(UserProfile) == 190, "UserProfile struct size mismatch");
+static_assert(sizeof(UserProfile) == 192, "UserProfile struct size mismatch");
 #pragma pack(pop)
 
 #endif // _USER_PROFILE_H_

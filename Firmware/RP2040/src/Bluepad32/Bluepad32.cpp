@@ -11,6 +11,8 @@
 #include "Bluepad32/Bluepad32.h"
 #include "Board/board_api.h"
 #include "Board/ogxm_log.h"
+#include "UserSettings/UserSettings.h"
+#include "UserSettings/NVSTool.h"
 
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
     #error "Pico W must use BLUEPAD32_PLATFORM_CUSTOM"
@@ -36,8 +38,8 @@ bool feedback_timer_set_{false};
 
 // DS4 Lightbar control settings
 struct LightbarSettings {
-    uint8_t color_index{0};    // Current color (0-7)
-    uint8_t brightness{255};    // Brightness (0-255)
+    uint8_t color_index{7};    // Current color (0-7), default: white
+    uint8_t brightness{128};    // Brightness (0-255), default: half
     bool combo_active{false};   // Whether START+SELECT combo is held
     uint16_t prev_buttons{0};   // Previous button state for edge detection
 };
@@ -165,13 +167,20 @@ static void device_connected_cb(uni_hid_device_t* device) {
         return;
     }
 
-    // Restore saved lightbar color for DS4 on reconnect
-    if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
+    // Load saved lightbar settings from UserProfile for DS4
+    if (device->controller_type == CONTROLLER_TYPE_PS4Controller) {
+        UserProfile profile = UserSettings::get_instance().get_profile_by_index(idx);
         LightbarSettings& lb = lightbar_[idx];
-        uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
-        uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
-        uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
-        device->report_parser.set_lightbar_color(device, r, g, b);
+        lb.color_index = profile.lightbar_color_index;
+        lb.brightness = profile.lightbar_brightness;
+
+        // Apply the loaded settings to the controller
+        if (device->report_parser.set_lightbar_color != NULL) {
+            uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
+            uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
+            uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
+            device->report_parser.set_lightbar_color(device, r, g, b);
+        }
     }
 }
 
@@ -179,6 +188,24 @@ static void device_disconnected_cb(uni_hid_device_t* device) {
     int idx = uni_hid_device_get_idx_for_instance(device);
     if (idx >= MAX_GAMEPADS || idx < 0) {
         return;
+    }
+
+    // Save lightbar settings to UserProfile for DS4 on disconnect
+    if (device->controller_type == CONTROLLER_TYPE_PS4Controller) {
+        UserProfile profile = UserSettings::get_instance().get_profile_by_index(idx);
+        LightbarSettings& lb = lightbar_[idx];
+
+        // Only save if settings have changed
+        if (profile.lightbar_color_index != lb.color_index ||
+            profile.lightbar_brightness != lb.brightness) {
+            profile.lightbar_color_index = lb.color_index;
+            profile.lightbar_brightness = lb.brightness;
+
+            // Save without triggering a reboot (call NVSTool directly)
+            NVSTool& nvs = NVSTool::get_instance();
+            std::string profile_key = "profile_" + std::to_string(profile.id);
+            nvs.write(profile_key, &profile, sizeof(UserProfile));
+        }
     }
 
     bt_devices_[idx].connected = false;
@@ -293,6 +320,12 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
+
+    // Extract charging status if available
+    // Note: Bluepad32's uni_controller_t may have flags or misc_flags with charging info
+    // For DS4/DS5: Check if controller reports charging in battery status flags
+    // TODO: Verify with Bluepad32 API documentation for actual charging status field
+    gp_in.is_charging = 0;  // Default to not charging
 
     // DS4 Lightbar control via button combo: START + R2 + D-Pad
     // LEFT/RIGHT = change color, UP/DOWN = change brightness

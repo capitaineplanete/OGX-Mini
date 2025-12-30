@@ -112,6 +112,8 @@ public:
         int16_t  gyro_z;
         // Battery level (0-255, 255 = full)
         uint8_t  battery;
+        // Charging status (0 = not charging, 1 = charging)
+        uint8_t  is_charging;
 
         PadIn()
         {

@@ -37,4 +37,8 @@ UserProfile::UserProfile()
     analog_off_y = Gamepad::ANALOG_OFF_Y;
     analog_off_lb = Gamepad::ANALOG_OFF_LB;
     analog_off_rb = Gamepad::ANALOG_OFF_RB;
+
+    // DS4 Lightbar defaults: white color, half brightness
+    lightbar_color_index = 7;  // White
+    lightbar_brightness = 128;  // Half brightness
 }
