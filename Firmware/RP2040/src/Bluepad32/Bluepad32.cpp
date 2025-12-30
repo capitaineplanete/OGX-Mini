@@ -160,6 +160,19 @@ static uni_error_t device_discovered_cb(bd_addr_t addr, const char* name, uint16
 }
 
 static void device_connected_cb(uni_hid_device_t* device) {
+    int idx = uni_hid_device_get_idx_for_instance(device);
+    if (idx < 0 || idx >= MAX_GAMEPADS) {
+        return;
+    }
+
+    // Restore saved lightbar color for DS4 on reconnect
+    if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
+        LightbarSettings& lb = lightbar_[idx];
+        uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
+        uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
+        uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
+        device->report_parser.set_lightbar_color(device, r, g, b);
+    }
 }
 
 static void device_disconnected_cb(uni_hid_device_t* device) {
@@ -281,14 +294,14 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
 
-    // DS4 Lightbar control via button combo: START + SELECT + D-Pad
+    // DS4 Lightbar control via button combo: START + R2 + D-Pad
     // LEFT/RIGHT = change color, UP/DOWN = change brightness
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF};
         LightbarSettings& lb = lightbar_[idx];
 
-        // Detect START + SELECT combo
-        bool combo_held = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->misc_buttons & MISC_BUTTON_BACK);
+        // Detect START + R2 combo (R2 > 200 = pressed)
+        bool combo_held = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > 200);
 
         if (combo_held) {
             // Change color with LEFT/RIGHT (on D-pad press, not hold)

@@ -82,20 +82,24 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
 
         // Populate sixaxis motion sensor data
         // Convert from int16_t (-32768 to +32767) to PS3's 10-bit format (0-1023, neutral at ~512)
+        // Use simple low-pass filter to smooth out noise
+        static int16_t filtered_accel_x = 0, filtered_accel_y = 0, filtered_accel_z = 0, filtered_gyro_z = 0;
+        constexpr float FILTER_ALPHA = 0.3f;  // Higher = more responsive, lower = smoother
+
+        filtered_accel_x = filtered_accel_x * (1.0f - FILTER_ALPHA) + gp_in.accel_x * FILTER_ALPHA;
+        filtered_accel_y = filtered_accel_y * (1.0f - FILTER_ALPHA) + gp_in.accel_y * FILTER_ALPHA;
+        filtered_accel_z = filtered_accel_z * (1.0f - FILTER_ALPHA) + gp_in.accel_z * FILTER_ALPHA;
+        filtered_gyro_z = filtered_gyro_z * (1.0f - FILTER_ALPHA) + gp_in.gyro_z * FILTER_ALPHA;
+
         auto convert_motion = [](int16_t value) -> uint16_t {
-            // Apply deadzone to filter noise (ignore small movements)
-            constexpr int16_t DEADZONE = 2000;
-            if (value > -DEADZONE && value < DEADZONE) {
-                value = 0;  // Force to neutral if within deadzone
-            }
             // Scale from int16_t range to 10-bit range and offset to center at 512
             return static_cast<uint16_t>(((static_cast<int32_t>(value) + 32768) * 1024) / 65536);
         };
 
-        report_in_.acceler_x = convert_motion(gp_in.accel_x);
-        report_in_.acceler_y = convert_motion(gp_in.accel_y);
-        report_in_.acceler_z = convert_motion(gp_in.accel_z);
-        report_in_.gyro_z = convert_motion(gp_in.gyro_z);
+        report_in_.acceler_x = convert_motion(filtered_accel_x);
+        report_in_.acceler_y = convert_motion(filtered_accel_y);
+        report_in_.acceler_z = convert_motion(filtered_accel_z);
+        report_in_.gyro_z = convert_motion(filtered_gyro_z);
 
         // Populate battery level (0-255 from controller → 0-100 and state for PS3)
         uint8_t battery_percent = (gp_in.battery * 100) / 255;
