@@ -37,8 +37,9 @@ bool feedback_timer_set_{false};
 // DS4 Lightbar control settings
 struct LightbarSettings {
     uint8_t color_index{7};    // Current color (0-7) - Default: White
-    uint8_t brightness{64};    // Brightness (0-255) - Default: Quarter brightness
+    uint8_t brightness{14};    // Brightness (0-255) - Default: ~6% (2 notches below quarter)
     bool combo_active{false};  // Whether START+R2 combo is held
+    bool low_battery_mode{false};  // Whether currently in low battery mode (for hysteresis)
     uint8_t current_r{0};      // Currently applied R value
     uint8_t current_g{0};      // Currently applied G value
     uint8_t current_b{0};      // Currently applied B value
@@ -189,7 +190,7 @@ static void device_connected_cb(uni_hid_device_t* device) {
         return;
     }
 
-    // Apply default lightbar color for DS4 on connect (white @ half brightness)
+    // Apply default lightbar color for DS4 on connect (white @ ~6% brightness)
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         uint8_t r, g, b;
         calculate_color(idx, r, g, b);
@@ -377,7 +378,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             //   - Orange (255, 128, 0): Charging (cable connected + battery < 100%)
             //   - Green (0, 255, 0): Full charge (cable connected + battery == 100%)
             //   - Custom color: Not charging (wireless)
-            //   - Dim red (50, 0, 0): Low battery (<20%, overrides custom)
+            //   - Dim red (50, 0, 0): Low battery (<15%, overrides custom)
             //
             // BLOCKED: Bluepad32 only exposes controller->battery (0-255 percentage).
             // DS4 HID reports contain cable state in Byte 30 (USB) / Byte 32 (BT), bit 4,
@@ -386,14 +387,32 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             // Required: Modify Bluepad32's DS4 parser to expose cable_connected field
             // See: /tmp/charging_status_notes.md for implementation details
 
-            // Only override for low battery if we have valid battery data (>0)
-            // Prevents red flash on connect when battery=0 (uninitialized)
-            if (battery_pct < 20 && controller->battery > 0) {
-                apply_lightbar_color(device, idx, 50, 0, 0);
+            // Low battery detection with hysteresis to prevent spurious notifications
+            // from transient incorrect battery readings when PS3 switches to in-game mode
+            // - Enter low battery: <15% AND valid data (>0)
+            // - Exit low battery: >25%
+            // Prevents rapid toggling around threshold that causes notification spam
+            if (controller->battery > 0) {
+                if (lb.low_battery_mode) {
+                    // Currently in low battery mode - require >25% to exit (hysteresis)
+                    if (battery_pct > 25) {
+                        lb.low_battery_mode = false;
+                    }
+                } else {
+                    // Not in low battery mode - require <15% to enter
+                    if (battery_pct < 15) {
+                        lb.low_battery_mode = true;
+                    }
+                }
+            }
+
+            // Apply appropriate lightbar color based on battery state
+            if (lb.low_battery_mode) {
+                apply_lightbar_color(device, idx, 50, 0, 0);  // Dim red
             } else {
                 uint8_t r, g, b;
                 calculate_color(idx, r, g, b);
-                apply_lightbar_color(device, idx, r, g, b);
+                apply_lightbar_color(device, idx, r, g, b);  // Custom color
             }
 
             // TODO: Flash persistence disabled - causes hang on Pico 2W multicore
