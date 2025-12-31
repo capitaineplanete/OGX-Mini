@@ -88,19 +88,25 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.gyro_z = PS3::SIXAXIS_MID;
 
         // Populate battery level (0-255 from controller → 0-100 and state for PS3)
-        uint8_t battery_percent = (gp_in.battery * 100) / 255;
-        report_in_.move_power_status = battery_percent;
-
-        // Map to PS3 power state
         // Treat 0 as unknown/unavailable and default to FULL to avoid false low battery warnings
-        if (gp_in.battery == 0 || battery_percent > 80) {
+        if (gp_in.battery == 0) {
+            // Battery unavailable - set both fields to FULL to prevent notification spam
             report_in_.power_status = PS3::PowerState::FULL;
-        } else if (battery_percent > 50) {
-            report_in_.power_status = PS3::PowerState::HIGH;
-        } else if (battery_percent > 20) {
-            report_in_.power_status = PS3::PowerState::DISCHARGING;
+            report_in_.move_power_status = 100;
         } else {
-            report_in_.power_status = PS3::PowerState::LOW;
+            uint8_t battery_percent = (gp_in.battery * 100) / 255;
+            report_in_.move_power_status = battery_percent;
+
+            // Map to PS3 power state enum
+            if (battery_percent > 80) {
+                report_in_.power_status = PS3::PowerState::FULL;
+            } else if (battery_percent > 50) {
+                report_in_.power_status = PS3::PowerState::HIGH;
+            } else if (battery_percent > 20) {
+                report_in_.power_status = PS3::PowerState::DISCHARGING;
+            } else {
+                report_in_.power_status = PS3::PowerState::LOW;
+            }
         }
 
         if (gamepad.analog_enabled())
