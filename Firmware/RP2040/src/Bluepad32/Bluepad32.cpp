@@ -370,6 +370,21 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             lb.combo_active = true;
         } else {
             // Combo not held - apply appropriate color based on state
+
+            // TODO: Charging status colors
+            // Desired behavior:
+            //   - Orange (255, 128, 0): Charging (cable connected + battery < 100%)
+            //   - Green (0, 255, 0): Full charge (cable connected + battery == 100%)
+            //   - Custom color: Not charging (wireless)
+            //   - Dim red (50, 0, 0): Low battery (<20%, overrides custom)
+            //
+            // BLOCKED: Bluepad32 only exposes controller->battery (0-255 percentage).
+            // DS4 HID reports contain cable state in Byte 30 (USB) / Byte 32 (BT), bit 4,
+            // but Bluepad32 DS4 parser doesn't extract/expose it.
+            //
+            // Required: Modify Bluepad32's DS4 parser to expose cable_connected field
+            // See: /tmp/charging_status_notes.md for implementation details
+
             if (battery_pct < 20) {
                 // Critical battery - override with dim red
                 apply_lightbar_color(device, idx, 50, 0, 0);
