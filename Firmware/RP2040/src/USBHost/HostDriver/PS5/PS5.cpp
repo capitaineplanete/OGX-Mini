@@ -91,7 +91,16 @@ void PS5Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
 
     std::tie(gp_in.joystick_lx, gp_in.joystick_ly) = gamepad.scale_joystick_l(in_report->joystick_lx, in_report->joystick_ly);
     std::tie(gp_in.joystick_rx, gp_in.joystick_ry) = gamepad.scale_joystick_r(in_report->joystick_rx, in_report->joystick_ry);
-    
+
+    // DS5 doesn't have analog buttons, but simulate them for compatibility
+    // This ensures games expecting analog button data work correctly
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_A]  = (gp_in.buttons & gamepad.MAP_BUTTON_A)  ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_B]  = (gp_in.buttons & gamepad.MAP_BUTTON_B)  ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_X]  = (gp_in.buttons & gamepad.MAP_BUTTON_X)  ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_Y]  = (gp_in.buttons & gamepad.MAP_BUTTON_Y)  ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_LB] = (gp_in.buttons & gamepad.MAP_BUTTON_LB) ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_RB] = (gp_in.buttons & gamepad.MAP_BUTTON_RB) ? 0xFF : 0;
+
     gamepad.set_pad_in(gp_in);
 
     tuh_hid_receive_report(address, instance);

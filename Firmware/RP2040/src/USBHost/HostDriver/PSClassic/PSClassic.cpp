@@ -63,6 +63,14 @@ void PSClassicHost::process_report(Gamepad& gamepad, uint8_t address, uint8_t in
     gp_in.trigger_l = (in_report->buttons & PSClassic::Buttons::L2) ? Range::MAX<uint8_t> : Range::MIN<uint8_t>;
     gp_in.trigger_r = (in_report->buttons & PSClassic::Buttons::R2) ? Range::MAX<uint8_t> : Range::MIN<uint8_t>;
 
+    // PS Classic doesn't have analog buttons, but simulate them for compatibility
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_A]  = (gp_in.buttons & gamepad.MAP_BUTTON_A)  ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_B]  = (gp_in.buttons & gamepad.MAP_BUTTON_B)  ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_X]  = (gp_in.buttons & gamepad.MAP_BUTTON_X)  ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_Y]  = (gp_in.buttons & gamepad.MAP_BUTTON_Y)  ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_LB] = (gp_in.buttons & gamepad.MAP_BUTTON_LB) ? 0xFF : 0;
+    gp_in.analog[gamepad.MAP_ANALOG_OFF_RB] = (gp_in.buttons & gamepad.MAP_BUTTON_RB) ? 0xFF : 0;
+
     gamepad.set_pad_in(gp_in);
 
     tuh_hid_receive_report(address, instance);
