@@ -13,6 +13,7 @@
 #include "Board/ogxm_log.h"
 #include "UserSettings/NVSTool.h"
 #include "UserSettings/UserSettings.h"
+#include "TaskQueue/TaskQueue.h"
 
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
     #error "Pico W must use BLUEPAD32_PLATFORM_CUSTOM"
@@ -99,20 +100,33 @@ static std::string lightbar_key(uint8_t idx)
     return "lb_" + std::to_string(idx);
 }
 
-// Helper: Save lightbar settings to flash
+// Helper: Save lightbar settings to flash (queued on Core 0)
 static void save_lightbar_settings(uint8_t idx)
 {
     if (idx >= MAX_GAMEPADS) return;
 
-    struct PersistentData {
-        uint8_t color_index;
-        uint8_t brightness;
-    } data;
+    // Capture current settings
+    uint8_t color_idx = lightbar_[idx].color_index;
+    uint8_t brightness = lightbar_[idx].brightness;
 
-    data.color_index = lightbar_[idx].color_index;
-    data.brightness = lightbar_[idx].brightness;
+    // Queue flash write on Core 0 (CRITICAL: flash writes must be on Core 0!)
+    TaskQueue::Core0::queue_delayed_task(
+        TaskQueue::Core0::get_new_task_id(),
+        100,  // Short delay to ensure combo is released
+        false,
+        [idx, color_idx, brightness]()
+        {
+            struct PersistentData {
+                uint8_t color_index;
+                uint8_t brightness;
+            } data;
 
-    NVSTool::get_instance().write(lightbar_key(idx), &data, sizeof(data));
+            data.color_index = color_idx;
+            data.brightness = brightness;
+
+            NVSTool::get_instance().write(lightbar_key(idx), &data, sizeof(data));
+        }
+    );
 }
 
 // Helper: Load lightbar settings from flash
@@ -457,18 +471,9 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 apply_lightbar_color(device, idx, r, g, b);
             }
 
-            // Save settings to flash when combo is released (batches all changes into one write)
+            // Save settings to flash when combo is released (queued on Core 0)
             if (lb.combo_active) {
                 save_lightbar_settings(idx);
-
-                // Provide double-blink LED feedback to confirm settings saved
-                board_api::set_led(false);
-                sleep_ms(100);
-                board_api::set_led(true);
-                sleep_ms(100);
-                board_api::set_led(false);
-                sleep_ms(100);
-                board_api::set_led(true);
             }
 
             lb.combo_active = false;
