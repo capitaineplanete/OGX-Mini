@@ -212,31 +212,25 @@ public:
     {
         mutex_enter_blocking(&pad_in_mutex_);
 
-        // Apply button delay if configured
-        if (button_delay_ms_ > 0)
+        // Early exit if delay disabled (0ms) - zero overhead when feature not used
+        if (button_delay_ms_)
         {
             // Check if buttons/dpad changed
             if (pad_in.buttons != last_buttons_ || pad_in.dpad != last_dpad_)
             {
-                // Buttons changed - reset timer
                 last_buttons_ = pad_in.buttons;
                 last_dpad_ = pad_in.dpad;
                 button_change_time_ = get_absolute_time();
-
-                // Don't update pad_in yet, keep previous state
                 mutex_exit(&pad_in_mutex_);
                 return;
             }
 
-            // Buttons stable - check if delay elapsed
-            int64_t elapsed_ms = absolute_time_diff_us(button_change_time_, get_absolute_time()) / 1000;
-            if (elapsed_ms < button_delay_ms_)
+            // Buttons stable - check if delay elapsed (single computation)
+            if (absolute_time_diff_us(button_change_time_, get_absolute_time()) < static_cast<int64_t>(button_delay_ms_) * 1000)
             {
-                // Delay not elapsed yet, keep previous state
                 mutex_exit(&pad_in_mutex_);
                 return;
             }
-            // Delay elapsed, proceed with update
         }
 
         pad_in_ = pad_in;
