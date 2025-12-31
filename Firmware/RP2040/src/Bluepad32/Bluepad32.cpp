@@ -125,6 +125,15 @@ static void save_lightbar_settings(uint8_t idx)
             data.brightness = brightness;
 
             NVSTool::get_instance().write(lightbar_key(idx), &data, sizeof(data));
+
+            // Double-blink LED to confirm save completed
+            board_api::set_led(false);
+            sleep_ms(50);
+            board_api::set_led(true);
+            sleep_ms(50);
+            board_api::set_led(false);
+            sleep_ms(50);
+            board_api::set_led(true);
         }
     );
 }
@@ -473,15 +482,6 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
             // Save settings to flash when combo is released (queued on Core 0)
             if (lb.combo_active) {
-                // Quick double-blink feedback (before async flash write)
-                board_api::set_led(false);
-                sleep_ms(50);
-                board_api::set_led(true);
-                sleep_ms(50);
-                board_api::set_led(false);
-                sleep_ms(50);
-                board_api::set_led(true);
-
                 save_lightbar_settings(idx);
             }
 
