@@ -189,10 +189,11 @@ static void device_connected_cb(uni_hid_device_t* device) {
         return;
     }
 
-    // Apply default lightbar color for DS4 on connect (white @ half brightness)
+    // Apply default lightbar color for DS4 on connect (white @ dimmed brightness)
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         uint8_t r, g, b;
         calculate_color(idx, r, g, b);
+        OGXM_LOG("DS4 BT connect: brightness=%d, RGB=(%d,%d,%d)\n", lightbar_[idx].brightness, r, g, b);
         apply_lightbar_color(device, idx, r, g, b);
     }
 }

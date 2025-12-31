@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include "USBDevice/DeviceDriver/PS3/PS3.h"
+#include "Board/ogxm_log.h"
 
 void PS3Device::initialize() 
 {
@@ -148,6 +149,11 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
 
     if (tud_hid_ready())
     {
+        static uint32_t log_counter = 0;
+        if (log_counter++ % 300 == 0) {  // Log every ~5 seconds at 60Hz
+            OGXM_LOG("PS3 Battery: move_power_status=%d, power_status=0x%02X\n",
+                     report_in_.move_power_status, report_in_.power_status);
+        }
         //PS3 seems to start using stale data if a report isn't sent every frame
         tud_hid_report(0, reinterpret_cast<uint8_t*>(&report_in_), sizeof(PS3::InReport));
     }
