@@ -37,6 +37,10 @@ private:
     PS3::OutReport out_report_;
     InitState init_state_;
 
+    // Debouncing state to prevent phantom button presses (2-3 rapid LEFT presses, etc.)
+    uint32_t last_button_change_us_{0};
+    static constexpr uint32_t BUTTON_DEBOUNCE_US = 8000;  // 8ms debounce window
+
     static bool send_control_xfer(uint8_t dev_addr, const tusb_control_request_t* req, uint8_t* buffer, tuh_xfer_cb_t complete_cb, uintptr_t user_data);
     static void get_report_complete_cb(tuh_xfer_s *xfer);
 };

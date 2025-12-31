@@ -107,6 +107,26 @@ void PS3Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
         return;
     }
 
+    // Debounce button changes to prevent phantom presses (e.g., LEFT pressed 2-3 times rapidly)
+    bool buttons_changed = (prev_in_report_.buttons[0] != in_report->buttons[0]) ||
+                          (prev_in_report_.buttons[1] != in_report->buttons[1]) ||
+                          (prev_in_report_.buttons[2] != in_report->buttons[2]);
+
+    if (buttons_changed)
+    {
+        uint32_t now_us = time_us_32();
+        uint32_t time_since_last_change = now_us - last_button_change_us_;
+
+        // If button state changed too quickly (within debounce window), ignore it
+        if (last_button_change_us_ != 0 && time_since_last_change < BUTTON_DEBOUNCE_US)
+        {
+            tuh_hid_receive_report(address, instance);
+            return;
+        }
+
+        last_button_change_us_ = now_us;
+    }
+
     Gamepad::PadIn gp_in;   
 
     if (in_report->buttons[0] & PS3::Buttons0::DPAD_UP)    gp_in.dpad |= gamepad.MAP_DPAD_UP;
