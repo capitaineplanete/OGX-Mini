@@ -361,6 +361,12 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 apply_lightbar_color(device, idx, r, g, b);
             }
 
+            // Intercept combo inputs - prevent them from reaching the host/PS3
+            // Clear START, R2 trigger, and any DPAD to avoid accidental game inputs
+            gp_in.buttons &= ~gamepad->MAP_BUTTON_START;  // Clear START
+            gp_in.trigger_r = 0;                           // Clear R2 trigger
+            gp_in.dpad = 0;                                // Clear D-pad
+
             lb.combo_active = true;
         } else {
             // Combo not held - apply appropriate color based on state
