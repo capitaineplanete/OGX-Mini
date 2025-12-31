@@ -12,6 +12,7 @@
 #include "Board/board_api.h"
 #include "Board/ogxm_log.h"
 #include "UserSettings/NVSTool.h"
+#include "UserSettings/UserSettings.h"
 
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
     #error "Pico W must use BLUEPAD32_PLATFORM_CUSTOM"
@@ -124,6 +125,7 @@ static bool load_lightbar_settings(uint8_t idx)
         uint8_t brightness;
     } data;
 
+    // Try loading runtime settings first (quick saves from combo)
     if (NVSTool::get_instance().read(lightbar_key(idx), &data, sizeof(data)))
     {
         // Validate loaded data
@@ -135,6 +137,16 @@ static bool load_lightbar_settings(uint8_t idx)
         }
     }
 
+    // Fall back to UserProfile defaults (set via web UI)
+    UserProfile profile = UserSettings::get_instance().get_profile_by_index(idx);
+    if (profile.lightbar_color_index < 8 && profile.lightbar_brightness <= 255)
+    {
+        lightbar_[idx].color_index = profile.lightbar_color_index;
+        lightbar_[idx].brightness = profile.lightbar_brightness;
+        return true;
+    }
+
+    // Use hardcoded defaults if all else fails (white at half brightness)
     return false;
 }
 
