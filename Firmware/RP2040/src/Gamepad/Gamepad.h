@@ -211,28 +211,6 @@ public:
     inline void set_pad_in(PadIn pad_in)
     {
         mutex_enter_blocking(&pad_in_mutex_);
-
-        // Early exit if delay disabled (0ms) - zero overhead when feature not used
-        if (button_delay_ms_)
-        {
-            // Check if buttons/dpad changed
-            if (pad_in.buttons != last_buttons_ || pad_in.dpad != last_dpad_)
-            {
-                last_buttons_ = pad_in.buttons;
-                last_dpad_ = pad_in.dpad;
-                button_change_time_ = get_absolute_time();
-                mutex_exit(&pad_in_mutex_);
-                return;
-            }
-
-            // Buttons stable - check if delay elapsed (single computation)
-            if (absolute_time_diff_us(button_change_time_, get_absolute_time()) < static_cast<int64_t>(button_delay_ms_) * 1000)
-            {
-                mutex_exit(&pad_in_mutex_);
-                return;
-            }
-        }
-
         pad_in_ = pad_in;
         new_pad_in_.store(true);
         mutex_exit(&pad_in_mutex_);
@@ -398,18 +376,10 @@ private:
     bool trig_settings_l_en_{false};
     bool trig_settings_r_en_{false};
 
-    // Button delay settings
-    uint16_t button_delay_ms_{0};
-    uint16_t last_buttons_{0};
-    uint8_t last_dpad_{0};
-    absolute_time_t button_change_time_;
-
     void set_profile_settings(const UserProfile& profile)
     {
         profile_analog_enabled_ = profile.analog_enabled ? true : false;
-        button_delay_ms_ = profile.button_delay_ms;
         OGXM_LOG("profile_analog_enabled_: %d\n", profile_analog_enabled_);
-        OGXM_LOG("button_delay_ms: %d\n", button_delay_ms_);
 
         if ((joy_settings_l_en_ = !joy_settings_l_.is_same(profile.joystick_settings_l)))
         {
