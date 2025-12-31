@@ -84,18 +84,43 @@ public:
     {
         mutex_enter_blocking(&nvs_mutex_);
 
-        for (uint32_t i = 0; i < NVS_SECTORS; ++i) 
+        for (uint32_t i = 0; i < NVS_SECTORS; ++i)
         {
-            flash_range_erase(NVS_START_OFFSET + i * FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+            // RP2350/Pico 2W requires flash_safe_execute for multicore safety
+            uint32_t offset = NVS_START_OFFSET + i * FLASH_SECTOR_SIZE;
+            int rc = flash_safe_execute(
+                [](void* param) {
+                    flash_range_erase(reinterpret_cast<uintptr_t>(param), FLASH_SECTOR_SIZE);
+                },
+                reinterpret_cast<void*>(offset),
+                UINT32_MAX
+            );
+            (void)rc; // Suppress unused warning
         }
 
         Entry entry;
 
-        for (uint32_t i = 0; i < MAX_ENTRIES + 1; ++i) 
+        for (uint32_t i = 0; i < MAX_ENTRIES + 1; ++i)
         {
-            flash_range_program(NVS_START_OFFSET + i * sizeof(Entry), 
-                                reinterpret_cast<const uint8_t*>(&entry), 
-                                sizeof(Entry));
+            // RP2350/Pico 2W requires flash_safe_execute for multicore safety
+            struct ProgramParams {
+                uint32_t offset;
+                const uint8_t* data;
+                size_t len;
+            };
+            ProgramParams params{NVS_START_OFFSET + i * sizeof(Entry),
+                               reinterpret_cast<const uint8_t*>(&entry),
+                               sizeof(Entry)};
+
+            int rc = flash_safe_execute(
+                [](void* param) {
+                    auto* p = static_cast<ProgramParams*>(param);
+                    flash_range_program(p->offset, p->data, p->len);
+                },
+                &params,
+                UINT32_MAX
+            );
+            (void)rc; // Suppress unused warning
         }
 
         mutex_exit(&nvs_mutex_);
@@ -160,18 +185,44 @@ private:
         std::array<uint8_t, FLASH_SECTOR_SIZE> sector_buffer;
         std::memcpy(sector_buffer.data(), reinterpret_cast<const uint8_t*>(XIP_BASE + sector_offset), FLASH_SECTOR_SIZE);
 
-        flash_range_erase(sector_offset, FLASH_SECTOR_SIZE);
-
+        // Prepare entry in RAM first
         Entry* entry_to_write = reinterpret_cast<Entry*>(sector_buffer.data() + entry_offset);
-
         *entry_to_write = Entry();
         std::strncpy(entry_to_write->key, key.c_str(), key.size());
         entry_to_write->key[key.size()] = '\0';
         std::memcpy(entry_to_write->value, buffer, len);
 
-        for (uint32_t i = 0; i < FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE; ++i) 
+        // RP2350/Pico 2W: Use flash_safe_execute for multicore safety
+        // Erase sector
+        int rc = flash_safe_execute(
+            [](void* param) {
+                flash_range_erase(reinterpret_cast<uintptr_t>(param), FLASH_SECTOR_SIZE);
+            },
+            reinterpret_cast<void*>(sector_offset),
+            UINT32_MAX
+        );
+        (void)rc;
+
+        // Program all pages in sector
+        struct ProgramParams {
+            uint32_t offset;
+            const uint8_t* data;
+        };
+
+        for (uint32_t i = 0; i < FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE; ++i)
         {
-            flash_range_program(sector_offset + i * FLASH_PAGE_SIZE, sector_buffer.data() + i * FLASH_PAGE_SIZE, FLASH_PAGE_SIZE);
+            ProgramParams params{sector_offset + i * FLASH_PAGE_SIZE,
+                               sector_buffer.data() + i * FLASH_PAGE_SIZE};
+
+            rc = flash_safe_execute(
+                [](void* param) {
+                    auto* p = static_cast<ProgramParams*>(param);
+                    flash_range_program(p->offset, p->data, FLASH_PAGE_SIZE);
+                },
+                &params,
+                UINT32_MAX
+            );
+            (void)rc;
         }
     }
 
