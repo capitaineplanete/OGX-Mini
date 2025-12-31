@@ -47,16 +47,9 @@ struct UserProfile
     uint8_t analog_off_lb;
     uint8_t analog_off_rb;
 
-    // DS4 Lightbar settings
-    uint8_t lightbar_color_index;  // Color index 0-7
-    uint8_t lightbar_brightness;   // Brightness 0-255
-
-    // Button delay setting (ms)
-    uint16_t button_delay_ms;      // Delay before button registers (0-1000ms)
-
     UserProfile();
 };
-static_assert(sizeof(UserProfile) == 194, "UserProfile struct size mismatch");
+static_assert(sizeof(UserProfile) == 190, "UserProfile struct size mismatch");
 #pragma pack(pop)
 
 #endif // _USER_PROFILE_H_

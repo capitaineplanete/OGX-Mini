@@ -11,9 +11,6 @@
 #include "Bluepad32/Bluepad32.h"
 #include "Board/board_api.h"
 #include "Board/ogxm_log.h"
-#include "UserSettings/NVSTool.h"
-#include "UserSettings/UserSettings.h"
-#include "TaskQueue/TaskQueue.h"
 
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
     #error "Pico W must use BLUEPAD32_PLATFORM_CUSTOM"
@@ -40,7 +37,7 @@ bool feedback_timer_set_{false};
 // DS4 Lightbar control settings
 struct LightbarSettings {
     uint8_t color_index{7};    // Current color (0-7) - Default: White
-    uint8_t brightness{128};   // Brightness (0-255) - Default: Half brightness
+    uint8_t brightness{64};    // Brightness (0-255) - Default: Quarter brightness
     bool combo_active{false};  // Whether START+R2 combo is held
     uint8_t current_r{0};      // Currently applied R value
     uint8_t current_g{0};      // Currently applied G value
@@ -92,85 +89,6 @@ static void calculate_color(int idx, uint8_t& r, uint8_t& g, uint8_t& b)
     r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
     g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
     b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
-}
-
-// Helper: Generate flash key for lightbar settings (per gamepad)
-static std::string lightbar_key(uint8_t idx)
-{
-    return "lb_" + std::to_string(idx);
-}
-
-// Helper: Save lightbar settings to flash (queued on Core 0)
-static void save_lightbar_settings(uint8_t idx)
-{
-    if (idx >= MAX_GAMEPADS) return;
-
-    // Capture current settings
-    uint8_t color_idx = lightbar_[idx].color_index;
-    uint8_t brightness = lightbar_[idx].brightness;
-
-    // Queue flash write on Core 0 (CRITICAL: flash writes must be on Core 0!)
-    TaskQueue::Core0::queue_delayed_task(
-        TaskQueue::Core0::get_new_task_id(),
-        100,  // Short delay to ensure combo is released
-        false,
-        [idx, color_idx, brightness]()
-        {
-            struct PersistentData {
-                uint8_t color_index;
-                uint8_t brightness;
-            } data;
-
-            data.color_index = color_idx;
-            data.brightness = brightness;
-
-            NVSTool::get_instance().write(lightbar_key(idx), &data, sizeof(data));
-
-            // Double-blink LED to confirm save completed
-            board_api::set_led(false);
-            sleep_ms(50);
-            board_api::set_led(true);
-            sleep_ms(50);
-            board_api::set_led(false);
-            sleep_ms(50);
-            board_api::set_led(true);
-        }
-    );
-}
-
-// Helper: Load lightbar settings from flash
-static bool load_lightbar_settings(uint8_t idx)
-{
-    if (idx >= MAX_GAMEPADS) return false;
-
-    struct PersistentData {
-        uint8_t color_index;
-        uint8_t brightness;
-    } data;
-
-    // Try loading runtime settings first (quick saves from combo)
-    if (NVSTool::get_instance().read(lightbar_key(idx), &data, sizeof(data)))
-    {
-        // Validate loaded data
-        if (data.color_index < 8 && data.brightness <= 255)
-        {
-            lightbar_[idx].color_index = data.color_index;
-            lightbar_[idx].brightness = data.brightness;
-            return true;
-        }
-    }
-
-    // Fall back to UserProfile defaults (set via web UI)
-    UserProfile profile = UserSettings::get_instance().get_profile_by_index(idx);
-    if (profile.lightbar_color_index < 8 && profile.lightbar_brightness <= 255)
-    {
-        lightbar_[idx].color_index = profile.lightbar_color_index;
-        lightbar_[idx].brightness = profile.lightbar_brightness;
-        return true;
-    }
-
-    // Use hardcoded defaults if all else fails (white at half brightness)
-    return false;
 }
 
 //This solves a function pointer/crash issue with bluepad32
@@ -271,16 +189,8 @@ static void device_connected_cb(uni_hid_device_t* device) {
         return;
     }
 
-    // Apply default lightbar color for DS4 on connect
+    // Apply default lightbar color for DS4 on connect (white @ half brightness)
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
-        // Use UserProfile defaults (white at half brightness)
-        // Runtime flash persistence disabled due to multicore safety issues
-        UserProfile profile = UserSettings::get_instance().get_profile_by_index(idx);
-        if (profile.lightbar_color_index < 8 && profile.lightbar_brightness <= 255) {
-            lightbar_[idx].color_index = profile.lightbar_color_index;
-            lightbar_[idx].brightness = profile.lightbar_brightness;
-        }
-
         uint8_t r, g, b;
         calculate_color(idx, r, g, b);
         apply_lightbar_color(device, idx, r, g, b);
@@ -475,11 +385,11 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             // Required: Modify Bluepad32's DS4 parser to expose cable_connected field
             // See: /tmp/charging_status_notes.md for implementation details
 
-            if (battery_pct < 20) {
-                // Critical battery - override with dim red
+            // Only override for low battery if we have valid battery data (>0)
+            // Prevents red flash on connect when battery=0 (uninitialized)
+            if (battery_pct < 20 && controller->battery > 0) {
                 apply_lightbar_color(device, idx, 50, 0, 0);
             } else {
-                // Normal operation - use custom color
                 uint8_t r, g, b;
                 calculate_color(idx, r, g, b);
                 apply_lightbar_color(device, idx, r, g, b);
