@@ -92,7 +92,8 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.move_power_status = battery_percent;
 
         // Map to PS3 power state
-        if (battery_percent > 80) {
+        // Treat 0 as unknown/unavailable and default to FULL to avoid false low battery warnings
+        if (gp_in.battery == 0 || battery_percent > 80) {
             report_in_.power_status = PS3::PowerState::FULL;
         } else if (battery_percent > 50) {
             report_in_.power_status = PS3::PowerState::HIGH;
