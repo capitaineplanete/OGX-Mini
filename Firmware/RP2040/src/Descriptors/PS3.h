@@ -144,6 +144,7 @@ namespace PS3
 			joystick_ry = JOYSTICK_MID;
 			plugged = PlugState::PLUGGED;
 			power_status = PowerState::FULL;
+			move_power_status = 100;  // Must match FULL state to prevent notification spam
 			rumble_status = RumbleState::WIRED_RUMBLE;
 			acceler_x = acceler_y = acceler_z = gyro_z = SIXAXIS_MID;
 		}

@@ -6,11 +6,14 @@
 
 #include "USBHost/HostDriver/PS4/PS4.h"
 
-void PS4Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report_desc, uint16_t desc_len) 
+void PS4Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report_desc, uint16_t desc_len)
 {
     out_report_.report_id = 0x05;
     out_report_.set_led = 1;
-    out_report_.lightbar_blue = 0xFF / 2;
+    // Default: White at ~30% brightness (2 notches below half: 128 - 50 = 78)
+    out_report_.lightbar_red = 78;
+    out_report_.lightbar_green = 78;
+    out_report_.lightbar_blue = 78;
 
     tuh_hid_receive_report(address, instance);
 }

@@ -5,15 +5,19 @@
 
 #include "USBHost/HostDriver/PS5/PS5.h"
 
-void PS5Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report_desc, uint16_t desc_len) 
+void PS5Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report_desc, uint16_t desc_len)
 {
     out_report_.report_id = PS5::OutReportID::CONTROL;
     out_report_.control_flag[0] = 2;
     out_report_.control_flag[1] = 2;
     out_report_.led_control_flag = 0x01 | 0x02;
     out_report_.pulse_option = 1;
-    out_report_.led_brightness = 0xFF;
+    // Default: ~30% brightness (2 notches below half: 128 - 50 = 78)
+    out_report_.led_brightness = 78;
     out_report_.player_number = idx_ + 1;
+    // Default: White (RGB all at max, brightness controls intensity)
+    out_report_.lightbar_red = 0xFF;
+    out_report_.lightbar_green = 0xFF;
     out_report_.lightbar_blue = 0xFF;
 
     while (!tuh_hid_send_report(address, instance, 0, &out_report_, sizeof(PS5::OutReport)))
