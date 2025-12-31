@@ -37,7 +37,7 @@ TODO
 
 - [x] intercept combo and dont pass it to host
 
-- [x] phantom keys
+- [ ] phantom keys. up arrow or joystick up idk
 - [ ] phantom LEFT arrow presses happen 2-3 times
   rapidly in succession.
 
@@ -48,19 +48,6 @@ only as needed. follow best practices.
 make sure it's performant, non repetitive, follows
 best practices, mem safe and all of that
 
-for colours it could be beneficial to create a
-single controller for all those different options
-so we dont override ourselves but hey you know
-better this is only a suggestion
-
-dont implement all at once/in one go. do a bunch
-then another bunch in another go
-
 take a second look at all this code and make sure it's performant mem safe follwos best practices and is not bloated. consider split second and ms optimisations this is important. and make sure you dont repeat yourself. BTW what say you about this?
-for colours it could be beneficial to create a
-single controller for all those different options
-so we dont override ourselves but hey you know
-better this is only a suggestion
-also have the delay as disabled by default so we dont execute code thats not being currently used.
 
 EOF
