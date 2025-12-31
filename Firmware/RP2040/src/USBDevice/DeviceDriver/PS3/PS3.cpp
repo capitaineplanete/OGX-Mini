@@ -92,8 +92,17 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         filtered_gyro_z = filtered_gyro_z * (1.0f - FILTER_ALPHA) + gp_in.gyro_z * FILTER_ALPHA;
 
         auto convert_motion = [](int16_t value) -> uint16_t {
+            // Apply deadzone to filter noise (ignore small movements near neutral)
+            constexpr int16_t DEADZONE = 1500;
+            if (value > -DEADZONE && value < DEADZONE) {
+                value = 0;  // Force to neutral if within deadzone
+            }
             // Scale from int16_t range to 10-bit range and offset to center at 512
-            return static_cast<uint16_t>(((static_cast<int32_t>(value) + 32768) * 1024) / 65536);
+            int32_t scaled = ((static_cast<int32_t>(value) + 32768) * 1024) / 65536;
+            // Clamp to valid 10-bit range (0-1023)
+            if (scaled < 0) scaled = 0;
+            if (scaled > 1023) scaled = 1023;
+            return static_cast<uint16_t>(scaled);
         };
 
         report_in_.acceler_x = convert_motion(filtered_accel_x);
