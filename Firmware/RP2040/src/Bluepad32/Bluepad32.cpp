@@ -271,10 +271,15 @@ static void device_connected_cb(uni_hid_device_t* device) {
         return;
     }
 
-    // Apply saved custom lightbar color for DS4 on connect
+    // Apply default lightbar color for DS4 on connect
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
-        // Load saved settings from flash (falls back to defaults if not found)
-        load_lightbar_settings(idx);
+        // Use UserProfile defaults (white at half brightness)
+        // Runtime flash persistence disabled due to multicore safety issues
+        UserProfile profile = UserSettings::get_instance().get_profile_by_index(idx);
+        if (profile.lightbar_color_index < 8 && profile.lightbar_brightness <= 255) {
+            lightbar_[idx].color_index = profile.lightbar_color_index;
+            lightbar_[idx].brightness = profile.lightbar_brightness;
+        }
 
         uint8_t r, g, b;
         calculate_color(idx, r, g, b);
@@ -480,10 +485,9 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 apply_lightbar_color(device, idx, r, g, b);
             }
 
-            // Save settings to flash when combo is released (queued on Core 0)
-            if (lb.combo_active) {
-                save_lightbar_settings(idx);
-            }
+            // TODO: Flash persistence disabled - causes hang on Pico 2W multicore
+            // Settings persist only during current session (until reboot/reconnect)
+            // Will re-enable when proper multicore flash coordination is implemented
 
             lb.combo_active = false;
         }
