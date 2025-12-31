@@ -11,6 +11,7 @@
 #include "Bluepad32/Bluepad32.h"
 #include "Board/board_api.h"
 #include "Board/ogxm_log.h"
+#include "UserSettings/NVSTool.h"
 
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
     #error "Pico W must use BLUEPAD32_PLATFORM_CUSTOM"
@@ -89,6 +90,52 @@ static void calculate_color(int idx, uint8_t& r, uint8_t& g, uint8_t& b)
     r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
     g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
     b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
+}
+
+// Helper: Generate flash key for lightbar settings (per gamepad)
+static std::string lightbar_key(uint8_t idx)
+{
+    return "lb_" + std::to_string(idx);
+}
+
+// Helper: Save lightbar settings to flash
+static void save_lightbar_settings(uint8_t idx)
+{
+    if (idx >= MAX_GAMEPADS) return;
+
+    struct PersistentData {
+        uint8_t color_index;
+        uint8_t brightness;
+    } data;
+
+    data.color_index = lightbar_[idx].color_index;
+    data.brightness = lightbar_[idx].brightness;
+
+    NVSTool::get_instance().write(lightbar_key(idx), &data, sizeof(data));
+}
+
+// Helper: Load lightbar settings from flash
+static bool load_lightbar_settings(uint8_t idx)
+{
+    if (idx >= MAX_GAMEPADS) return false;
+
+    struct PersistentData {
+        uint8_t color_index;
+        uint8_t brightness;
+    } data;
+
+    if (NVSTool::get_instance().read(lightbar_key(idx), &data, sizeof(data)))
+    {
+        // Validate loaded data
+        if (data.color_index < 8 && data.brightness <= 255)
+        {
+            lightbar_[idx].color_index = data.color_index;
+            lightbar_[idx].brightness = data.brightness;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 //This solves a function pointer/crash issue with bluepad32
@@ -191,6 +238,9 @@ static void device_connected_cb(uni_hid_device_t* device) {
 
     // Apply saved custom lightbar color for DS4 on connect
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
+        // Load saved settings from flash (falls back to defaults if not found)
+        load_lightbar_settings(idx);
+
         uint8_t r, g, b;
         calculate_color(idx, r, g, b);
         apply_lightbar_color(device, idx, r, g, b);
@@ -394,6 +444,21 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 calculate_color(idx, r, g, b);
                 apply_lightbar_color(device, idx, r, g, b);
             }
+
+            // Save settings to flash when combo is released (batches all changes into one write)
+            if (lb.combo_active) {
+                save_lightbar_settings(idx);
+
+                // Provide double-blink LED feedback to confirm settings saved
+                board_api::set_led(false);
+                sleep_ms(100);
+                board_api::set_led(true);
+                sleep_ms(100);
+                board_api::set_led(false);
+                sleep_ms(100);
+                board_api::set_led(true);
+            }
+
             lb.combo_active = false;
         }
 
