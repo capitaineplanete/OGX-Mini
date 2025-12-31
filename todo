@@ -5,8 +5,8 @@ TODO
 - [ ] ps3 randomly and continuesly reports battery
     is low when it is not. this was the case even
     before I implemented the battery levels reporting
-    to PS3
-- [ ] ps3 reports low battery when pic is
+    to PS3 even/while it is connect/ is being charged by pc (not connected to pico)
+- [x] ps3 reports low battery when pic is
   connected but no controller is.. strange
 
 - [ ] colour persistence/user pref persistence
@@ -37,8 +37,8 @@ TODO
 
 - [x] intercept combo and dont pass it to host
 
-- [ ] phantom keys. up arrow or joystick up idk
-- [ ] phantom LEFT arrow presses happen 2-3 times
+- [x] phantom keys. up arrow or joystick up idk
+- [x] phantom LEFT arrow presses happen 2-3 times
   rapidly in succession.
 
 think understand implementation in it's entirely
