@@ -37,9 +37,11 @@ bool feedback_timer_set_{false};
 // DS4 Lightbar control settings
 struct LightbarSettings {
     uint8_t color_index{0};    // Current color (0-7)
-    uint8_t brightness{255};    // Brightness (0-255)
-    bool combo_active{false};   // Whether START+SELECT combo is held
-    uint16_t prev_buttons{0};   // Previous button state for edge detection
+    uint8_t brightness{255};   // Brightness (0-255)
+    bool combo_active{false};  // Whether START+R2 combo is held
+    uint8_t current_r{0};      // Currently applied R value
+    uint8_t current_g{0};      // Currently applied G value
+    uint8_t current_b{0};      // Currently applied B value
 };
 LightbarSettings lightbar_[MAX_GAMEPADS];
 
@@ -65,6 +67,28 @@ bool any_connected()
         }
     }
     return false;
+}
+
+// Helper: Apply lightbar color only if it changed (avoid redundant calls)
+static void apply_lightbar_color(uni_hid_device_t* device, int idx, uint8_t r, uint8_t g, uint8_t b)
+{
+    LightbarSettings& lb = lightbar_[idx];
+    if (lb.current_r != r || lb.current_g != g || lb.current_b != b)
+    {
+        device->report_parser.set_lightbar_color(device, r, g, b);
+        lb.current_r = r;
+        lb.current_g = g;
+        lb.current_b = b;
+    }
+}
+
+// Helper: Calculate color from index and brightness
+static void calculate_color(int idx, uint8_t& r, uint8_t& g, uint8_t& b)
+{
+    LightbarSettings& lb = lightbar_[idx];
+    r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
+    g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
+    b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
 }
 
 //This solves a function pointer/crash issue with bluepad32
@@ -165,13 +189,11 @@ static void device_connected_cb(uni_hid_device_t* device) {
         return;
     }
 
-    // Restore saved lightbar color for DS4 on reconnect
+    // Apply saved custom lightbar color for DS4 on connect
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
-        LightbarSettings& lb = lightbar_[idx];
-        uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
-        uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
-        uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
-        device->report_parser.set_lightbar_color(device, r, g, b);
+        uint8_t r, g, b;
+        calculate_color(idx, r, g, b);
+        apply_lightbar_color(device, idx, r, g, b);
     }
 }
 
@@ -297,48 +319,54 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // DS4 Lightbar control via button combo: START + R2 + D-Pad
     // LEFT/RIGHT = change color, UP/DOWN = change brightness
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
-        static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF};
+        static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF, 0xFF, 0xFF, 0xFF};
         LightbarSettings& lb = lightbar_[idx];
 
         // Detect START + R2 combo (R2 > 200 = pressed)
         bool combo_held = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > 200);
 
+        uint8_t battery_pct = (controller->battery * 100) / 255;
+
         if (combo_held) {
             // Change color with LEFT/RIGHT (on D-pad press, not hold)
+            bool color_changed = false;
             if (uni_gp->dpad == DPAD_LEFT && prev_dpad[idx] != DPAD_LEFT) {
                 lb.color_index = (lb.color_index == 0) ? 7 : lb.color_index - 1;
+                color_changed = true;
             } else if (uni_gp->dpad == DPAD_RIGHT && prev_dpad[idx] != DPAD_RIGHT) {
                 lb.color_index = (lb.color_index + 1) % 8;
+                color_changed = true;
             }
 
             // Change brightness with UP/DOWN (on D-pad press, not hold)
             if (uni_gp->dpad == DPAD_UP && prev_dpad[idx] != DPAD_UP) {
                 lb.brightness = (lb.brightness >= 230) ? 255 : lb.brightness + 25;
+                color_changed = true;
             } else if (uni_gp->dpad == DPAD_DOWN && prev_dpad[idx] != DPAD_DOWN) {
                 lb.brightness = (lb.brightness <= 25) ? 0 : lb.brightness - 25;
+                color_changed = true;
             }
 
-            // Apply lightbar color with brightness
-            uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
-            uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
-            uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
-            device->report_parser.set_lightbar_color(device, r, g, b);
+            // Only apply if color/brightness actually changed
+            if (color_changed) {
+                uint8_t r, g, b;
+                calculate_color(idx, r, g, b);
+                apply_lightbar_color(device, idx, r, g, b);
+            }
 
             lb.combo_active = true;
         } else {
-            // Check battery - only override with dim red if critically low
-            uint8_t battery_pct = (controller->battery * 100) / 255;
+            // Combo not held - apply appropriate color based on state
             if (battery_pct < 20) {
-                // Dim red warning to save battery
-                device->report_parser.set_lightbar_color(device, 50, 0, 0);
-            } else if (lb.combo_active) {
-                // Combo just released - restore user's custom color
-                lb.combo_active = false;
-                uint8_t r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
-                uint8_t g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
-                uint8_t b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
-                device->report_parser.set_lightbar_color(device, r, g, b);
+                // Critical battery - override with dim red
+                apply_lightbar_color(device, idx, 50, 0, 0);
+            } else {
+                // Normal operation - use custom color
+                uint8_t r, g, b;
+                calculate_color(idx, r, g, b);
+                apply_lightbar_color(device, idx, r, g, b);
             }
+            lb.combo_active = false;
         }
 
         prev_dpad[idx] = uni_gp->dpad;

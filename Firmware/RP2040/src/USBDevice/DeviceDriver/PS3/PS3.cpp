@@ -80,35 +80,12 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.joystick_rx = Scale::int16_to_uint8(gp_in.joystick_rx);
         report_in_.joystick_ry = Scale::int16_to_uint8(gp_in.joystick_ry);
 
-        // Populate sixaxis motion sensor data
-        // Convert from int16_t (-32768 to +32767) to PS3's 10-bit format (0-1023, neutral at ~512)
-        // Use simple low-pass filter to smooth out noise
-        static int16_t filtered_accel_x = 0, filtered_accel_y = 0, filtered_accel_z = 0, filtered_gyro_z = 0;
-        constexpr float FILTER_ALPHA = 0.3f;  // Higher = more responsive, lower = smoother
-
-        filtered_accel_x = filtered_accel_x * (1.0f - FILTER_ALPHA) + gp_in.accel_x * FILTER_ALPHA;
-        filtered_accel_y = filtered_accel_y * (1.0f - FILTER_ALPHA) + gp_in.accel_y * FILTER_ALPHA;
-        filtered_accel_z = filtered_accel_z * (1.0f - FILTER_ALPHA) + gp_in.accel_z * FILTER_ALPHA;
-        filtered_gyro_z = filtered_gyro_z * (1.0f - FILTER_ALPHA) + gp_in.gyro_z * FILTER_ALPHA;
-
-        auto convert_motion = [](int16_t value) -> uint16_t {
-            // Apply deadzone to filter noise (ignore small movements near neutral)
-            constexpr int16_t DEADZONE = 1500;
-            if (value > -DEADZONE && value < DEADZONE) {
-                value = 0;  // Force to neutral if within deadzone
-            }
-            // Scale from int16_t range to 10-bit range and offset to center at 512
-            int32_t scaled = ((static_cast<int32_t>(value) + 32768) * 1024) / 65536;
-            // Clamp to valid 10-bit range (0-1023)
-            if (scaled < 0) scaled = 0;
-            if (scaled > 1023) scaled = 1023;
-            return static_cast<uint16_t>(scaled);
-        };
-
-        report_in_.acceler_x = convert_motion(filtered_accel_x);
-        report_in_.acceler_y = convert_motion(filtered_accel_y);
-        report_in_.acceler_z = convert_motion(filtered_accel_z);
-        report_in_.gyro_z = convert_motion(filtered_gyro_z);
+        // Populate sixaxis motion sensor data with neutral values
+        // PS3 doesn't interpret these correctly, so just send constant neutral to avoid unnecessary processing
+        report_in_.acceler_x = PS3::SIXAXIS_MID;
+        report_in_.acceler_y = PS3::SIXAXIS_MID;
+        report_in_.acceler_z = PS3::SIXAXIS_MID;
+        report_in_.gyro_z = PS3::SIXAXIS_MID;
 
         // Populate battery level (0-255 from controller → 0-100 and state for PS3)
         uint8_t battery_percent = (gp_in.battery * 100) / 255;
