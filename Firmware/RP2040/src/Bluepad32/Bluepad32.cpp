@@ -307,11 +307,12 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     std::tie(gp_in.joystick_lx, gp_in.joystick_ly) = gamepad->scale_joystick_l<10>(uni_gp->axis_x, uni_gp->axis_y);
     std::tie(gp_in.joystick_rx, gp_in.joystick_ry) = gamepad->scale_joystick_r<10>(uni_gp->axis_rx, uni_gp->axis_ry);
 
-    // Extract motion sensor data (sixaxis) from Bluepad32
-    gp_in.accel_x = uni_gp->accel[0];
-    gp_in.accel_y = uni_gp->accel[1];
-    gp_in.accel_z = uni_gp->accel[2];
-    gp_in.gyro_z = uni_gp->gyro[2];  // PS3 only uses Z-axis rotation
+    // Neutralize motion sensor data (sixaxis) - PS3 doesn't interpret these correctly
+    // Set to zero to avoid fluctuating values potentially causing timing/cache issues
+    gp_in.accel_x = 0;
+    gp_in.accel_y = 0;
+    gp_in.accel_z = 0;
+    gp_in.gyro_z = 0;
 
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
