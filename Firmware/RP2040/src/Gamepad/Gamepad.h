@@ -116,6 +116,7 @@ public:
         PadIn()
         {
             std::memset(this, 0, sizeof(PadIn));
+            battery = 255;  // Default to full battery to prevent false low battery warnings
         }
     };
 

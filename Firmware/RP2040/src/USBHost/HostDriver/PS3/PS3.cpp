@@ -98,7 +98,10 @@ void PS3Host::get_report_complete_cb(tuh_xfer_s *xfer)
 void PS3Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report, uint16_t len)
 {
     const PS3::InReport* in_report = reinterpret_cast<const PS3::InReport*>(report);
-    if (std::memcmp(&prev_in_report_, in_report, std::min(static_cast<size_t>(len), static_cast<size_t>(26))) == 0)
+
+    // Compare full report including battery and motion sensors to prevent phantom inputs
+    size_t cmp_size = std::min(static_cast<size_t>(len), sizeof(PS3::InReport));
+    if (std::memcmp(&prev_in_report_, in_report, cmp_size) == 0)
     {
         tuh_hid_receive_report(address, instance);
         return;
@@ -142,6 +145,30 @@ void PS3Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
 
     std::tie(gp_in.joystick_lx, gp_in.joystick_ly) = gamepad.scale_joystick_l(in_report->joystick_lx, in_report->joystick_ly);
     std::tie(gp_in.joystick_rx, gp_in.joystick_ry) = gamepad.scale_joystick_r(in_report->joystick_rx, in_report->joystick_ry);
+
+    // Extract battery level from PS3 power status enum and convert to 0-255 range
+    switch (in_report->power_status)
+    {
+        case PS3::PowerState::FULL:
+            gp_in.battery = 255;  // 100%
+            break;
+        case PS3::PowerState::HIGH:
+            gp_in.battery = 192;  // 75%
+            break;
+        case PS3::PowerState::DISCHARGING:
+            gp_in.battery = 128;  // 50%
+            break;
+        case PS3::PowerState::LOW:
+            gp_in.battery = 64;   // 25%
+            break;
+        case PS3::PowerState::CHARGING:
+        case PS3::PowerState::NOT_CHARGING:
+            gp_in.battery = 255;  // Assume full when charging/wired
+            break;
+        default:
+            gp_in.battery = 255;  // Default to full for unknown states
+            break;
+    }
 
     gamepad.set_pad_in(gp_in);
 
