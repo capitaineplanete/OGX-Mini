@@ -1,0 +1,66 @@
+TODO
+----
+- [ ] report if charging. see ds4 spec.
+- [ ] charging colours. see ds4 spec.
+- [ ] ps3 randomly and continuesly reports battery
+    is low when it is not. this was the case even
+    before I implemented the battery levels reporting
+    to PS3
+- [ ] ps3 reports low battery when pic is
+  connected but no controller is.. strange
+
+- [ ] colour persistence/user pref persistence
+  (deadzones, colours, interface) in flash across
+  updates (is this even possible?) this has to
+  optimal we dont have a lot of space look up pico 2
+  w specs, there are plenty of implementation
+  online check them out just make sure you are
+  choosing correct and performant code not a lacky
+  one.
+- [ ] feedback via double blink of pico led when
+  something is stored.
+- [c] implement colour selection in web ui + add
+  an option to introduce a delay in ms to any
+  button before it registers it's trigger. make
+  sure this is performant. that's a different
+  project and honeslty idc too much about it. <- typo that's how little i care!
+
+
+- [x] change default colour i.e. when controller
+  comes on to something more neutral, like white
+  with half brightness.
+
+- [ ] sixaxis? is this even possible?
+
+- [x] BUG: does not look for devices upon
+  disconnect (it used to even as far back as alpha 3!)
+
+- [x] intercept combo and dont pass it to host
+
+- [x] phantom keys
+- [ ] phantom LEFT arrow presses happen 2-3 times
+  rapidly in succession.
+
+think understand implementation in it's entirely
+think again plan then execute. minimal changes,
+only as needed. follow best practices.
+
+make sure it's performant, non repetitive, follows
+best practices, mem safe and all of that
+
+for colours it could be beneficial to create a
+single controller for all those different options
+so we dont override ourselves but hey you know
+better this is only a suggestion
+
+dont implement all at once/in one go. do a bunch
+then another bunch in another go
+
+take a second look at all this code and make sure it's performant mem safe follwos best practices and is not bloated. consider split second and ms optimisations this is important. and make sure you dont repeat yourself. BTW what say you about this?
+for colours it could be beneficial to create a
+single controller for all those different options
+so we dont override ourselves but hey you know
+better this is only a suggestion
+also have the delay as disabled by default so we dont execute code thats not being currently used.
+
+EOF
