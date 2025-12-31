@@ -48,6 +48,6 @@ only as needed. follow best practices.
 make sure it's performant, non repetitive, follows
 best practices, mem safe and all of that
 
-take a second look at all this code and make sure it's performant mem safe follwos best practices and is not bloated. consider split second and ms optimisations this is important. and make sure you dont repeat yourself. BTW what say you about this?
+take a second look at all this code you are writing and make sure it's performant mem safe follwos best practices and is not bloated. consider split second and ms optimisations this is important. and make sure you dont repeat yourself.
 
 EOF
