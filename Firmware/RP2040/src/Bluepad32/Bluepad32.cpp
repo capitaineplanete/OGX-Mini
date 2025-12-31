@@ -319,7 +319,14 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // DS4 Lightbar control via button combo: START + R2 + D-Pad
     // LEFT/RIGHT = change color, UP/DOWN = change brightness
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
-        static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF, 0xFF, 0xFF, 0xFF};
+        // Use 0xFF as sentinel (invalid dpad state - valid range is 0x00-0x0F)
+        constexpr uint8_t NO_PREV_DPAD = 0xFF;
+        static uint8_t prev_dpad[MAX_GAMEPADS];
+        static bool prev_dpad_initialized = false;
+        if (!prev_dpad_initialized) {
+            std::fill_n(prev_dpad, MAX_GAMEPADS, NO_PREV_DPAD);
+            prev_dpad_initialized = true;
+        }
         LightbarSettings& lb = lightbar_[idx];
 
         // Detect START + R2 combo (R2 > 200 = pressed)
