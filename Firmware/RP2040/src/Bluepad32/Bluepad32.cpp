@@ -302,7 +302,13 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
     // Only update charging detection every 2 seconds to reduce overhead
     uint32_t now = board_api::ms_since_boot();
-    if (now - last_battery_check[idx] >= 2000) {
+
+    if (last_battery_check[idx] == 0) {
+        // First run - just initialize baseline, don't set charging state yet
+        prev_battery_global[idx] = battery;
+        last_battery_check[idx] = now;
+    } else if (now - last_battery_check[idx] >= 2000) {
+        // Subsequent runs - compare battery to detect charging
         if (battery > prev_battery_global[idx] + 1) {
             charging_state[idx] = true;
         } else if (battery < prev_battery_global[idx]) {
