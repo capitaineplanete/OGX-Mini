@@ -87,21 +87,22 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.acceler_z = PS3::SIXAXIS_MID;
         report_in_.gyro_z = PS3::SIXAXIS_MID;
 
-        // Populate battery level (0-255 from controller → 0-100 and state for PS3)
+        // Battery status: Pico always appears as USB-connected to PS3
+        // USB controllers report CHARGING/NOT_CHARGING, not discharge states
+        // This prevents "charge controller" warnings on PS3
         uint8_t battery_percent = (gp_in.battery * 100) / 255;
         report_in_.move_power_status = battery_percent;
 
-        // Map to PS3 power state
-        // Treat 0 as unknown/unavailable and default to FULL to avoid false low battery warnings
-        if (gp_in.battery == 0 || battery_percent > 80) {
-            report_in_.power_status = PS3::PowerState::FULL;
-        } else if (battery_percent > 50) {
-            report_in_.power_status = PS3::PowerState::HIGH;
-        } else if (battery_percent > 20) {
-            report_in_.power_status = PS3::PowerState::DISCHARGING;
+        // For USB connection (which we always are), report charging status
+        // NOT_CHARGING = fully charged, CHARGING = actively charging
+        if (gp_in.battery == 0 || battery_percent >= 100) {
+            report_in_.power_status = PS3::PowerState::NOT_CHARGING;  // Full/unknown
         } else {
-            report_in_.power_status = PS3::PowerState::LOW;
+            report_in_.power_status = PS3::PowerState::CHARGING;  // < 100% = charging
         }
+
+        // Ensure plugged status reflects USB connection
+        report_in_.plugged = PS3::PlugState::PLUGGED;
 
         if (gamepad.analog_enabled())
         {
