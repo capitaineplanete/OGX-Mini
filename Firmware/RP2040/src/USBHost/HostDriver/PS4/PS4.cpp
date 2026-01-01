@@ -19,9 +19,32 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
 {
     std::memcpy(&in_report_, report, std::min(static_cast<size_t>(len), sizeof(PS4::InReport)));
     in_report_.buttons[2] &= PS4::COUNTER_MASK;
-    if (std::memcmp(reinterpret_cast<const PS4::InReport*>(report), &prev_in_report_, sizeof(PS4::InReport)) == 0)
+
+    // Compare masked report (not raw) to prevent counter from causing false changes
+    if (std::memcmp(&in_report_, &prev_in_report_, sizeof(PS4::InReport)) == 0)
     {
+        tuh_hid_receive_report(address, instance);
         return;
+    }
+
+    // Debounce button changes to prevent phantom presses from hardware bounce
+    bool buttons_changed = (prev_in_report_.buttons[0] != in_report_.buttons[0]) ||
+                          (prev_in_report_.buttons[1] != in_report_.buttons[1]) ||
+                          (prev_in_report_.buttons[2] != in_report_.buttons[2]);
+
+    if (buttons_changed)
+    {
+        uint32_t now_us = time_us_32();
+        uint32_t time_since_last_change = now_us - last_button_change_us_;
+
+        // Ignore button changes within 8ms debounce window
+        if (last_button_change_us_ != 0 && time_since_last_change < BUTTON_DEBOUNCE_US)
+        {
+            tuh_hid_receive_report(address, instance);
+            return;
+        }
+
+        last_button_change_us_ = now_us;
     }
 
     Gamepad::PadIn gp_in;   
