@@ -19,10 +19,6 @@ public:
 private:
     PS5::InReport prev_in_report_{};
     PS5::OutReport out_report_{};
-
-    // Debouncing state to prevent phantom button presses
-    uint32_t last_button_change_us_{0};
-    static constexpr uint32_t BUTTON_DEBOUNCE_US = 8000;  // 8ms debounce window
 };
 
 #endif // _PS5_HOST_H_
