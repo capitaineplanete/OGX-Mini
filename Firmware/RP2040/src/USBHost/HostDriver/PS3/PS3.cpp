@@ -108,17 +108,21 @@ void PS3Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
         return;
     }
 
-    // Debounce button changes to prevent phantom presses from hardware bounce
-    bool buttons_changed = (prev_in_report_.buttons[0] != in_report->buttons[0]) ||
-                          (prev_in_report_.buttons[1] != in_report->buttons[1]) ||
-                          (prev_in_report_.buttons[2] != in_report->buttons[2]);
+    // Debounce button RELEASES to prevent phantom presses from hardware bounce
+    // Allow button PRESSES through immediately (for combo detection)
+    uint32_t buttons_pressed = (in_report->buttons[0] | (in_report->buttons[1] << 8) | (in_report->buttons[2] << 16));
+    uint32_t prev_buttons = (prev_in_report_.buttons[0] | (prev_in_report_.buttons[1] << 8) | (prev_in_report_.buttons[2] << 16));
 
-    if (buttons_changed)
+    // Check if any buttons were RELEASED (bit went from 1 to 0)
+    uint32_t buttons_released = prev_buttons & ~buttons_pressed;
+
+    if (buttons_released != 0)
     {
         uint32_t now_us = time_us_32();
         uint32_t time_since_last_change = now_us - last_button_change_us_;
 
-        // Ignore button changes within 8ms debounce window
+        // Only debounce RELEASES - ignore release within 8ms window (likely bounce)
+        // Note: For PS3 we can't modify the const in_report, so we skip updating prev_in_report_
         if (last_button_change_us_ != 0 && time_since_last_change < BUTTON_DEBOUNCE_US)
         {
             tuh_hid_receive_report(address, instance);
