@@ -281,27 +281,9 @@ if(EN_UART_BRIDGE)
 endif()
 
 string(TIMESTAMP CURRENT_DATETIME "%Y-%m-%d %H:%M:%S")
-
-# Get git commit hash (last 7 characters)
-execute_process(
-    COMMAND git rev-parse --short=7 HEAD
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_COMMIT_HASH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-
-# If git command fails, set to "unknown"
-if(NOT GIT_COMMIT_HASH)
-    set(GIT_COMMIT_HASH "unknown")
-endif()
-
-message(STATUS "Git commit hash: ${GIT_COMMIT_HASH}")
-
 add_compile_definitions(BUILD_DATETIME="${CURRENT_DATETIME}")
 add_compile_definitions(FIRMWARE_NAME="${FW_NAME}")
 add_compile_definitions(FIRMWARE_VERSION="${FW_VERSION}")
-add_compile_definitions(GIT_COMMIT_HASH="${GIT_COMMIT_HASH}")
 add_compile_definitions(PICO_FLASH_SIZE_BYTES=${FLASH_SIZE_MB}*1024*1024)
 add_compile_definitions(NVS_SECTORS=4)
 
@@ -417,9 +399,9 @@ target_compile_definitions(libfixmath PRIVATE
 )
 
 if(OGXM_RETAIL STREQUAL "TRUE")
-    set(EXE_FILENAME "${FW_NAME}-${FW_VERSION}-${GIT_COMMIT_HASH}-${OGXM_BOARD}${BUILD_STR}-Retail")
+    set(EXE_FILENAME "${FW_NAME}-${FW_VERSION}-${OGXM_BOARD}${BUILD_STR}-Retail")
 else()
-    set(EXE_FILENAME "${FW_NAME}-${FW_VERSION}-${GIT_COMMIT_HASH}-${OGXM_BOARD}${BUILD_STR}")
+    set(EXE_FILENAME "${FW_NAME}-${FW_VERSION}-${OGXM_BOARD}${BUILD_STR}")
 endif()
 
 set_target_properties(${FW_NAME} PROPERTIES OUTPUT_NAME ${EXE_FILENAME})
