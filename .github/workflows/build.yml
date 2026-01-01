@@ -41,9 +41,21 @@ jobs:
                 ../Firmware/RP2040
           cmake --build .
 
-          # Move the generated .uf2 file to output/ without knowing the exact version
+          # Get git commit hash (short version)
+          GIT_HASH=$(git rev-parse --short=7 HEAD)
+
+          # Find the generated .uf2 file
           FILE=$(find . -maxdepth 1 -name "OGX-Mini-*-${{ matrix.board }}.uf2" | head -n 1)
-          cp "$FILE" ../output/
+
+          # Get the base filename without .uf2 extension
+          BASENAME=$(basename "$FILE" .uf2)
+
+          # Create new filename with git hash inserted before board name
+          # Example: OGX-Mini-1.0.0-PI_PICO2W.uf2 -> OGX-Mini-1.0.0-abc1234-PI_PICO2W.uf2
+          NEW_NAME=$(echo "$BASENAME" | sed "s/-${{ matrix.board }}$/-${GIT_HASH}-${{ matrix.board }}/")
+
+          # Copy with new name to output directory
+          cp "$FILE" "../output/${NEW_NAME}.uf2"
 
       - name: Upload UF2 Artifact
         uses: actions/upload-artifact@v4
