@@ -29,11 +29,11 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
 
     // Debounce button RELEASES to prevent phantom presses from hardware bounce
     // Allow button PRESSES through immediately (for combo detection)
-    uint16_t buttons_pressed = (in_report_.buttons[0] | (in_report_.buttons[1] << 8) | (in_report_.buttons[2] << 16));
-    uint16_t prev_buttons = (prev_in_report_.buttons[0] | (prev_in_report_.buttons[1] << 8) | (prev_in_report_.buttons[2] << 16));
+    uint32_t buttons_pressed = (in_report_.buttons[0] | (in_report_.buttons[1] << 8) | (in_report_.buttons[2] << 16));
+    uint32_t prev_buttons = (prev_in_report_.buttons[0] | (prev_in_report_.buttons[1] << 8) | (prev_in_report_.buttons[2] << 16));
 
     // Check if any buttons were RELEASED (bit went from 1 to 0)
-    uint16_t buttons_released = prev_buttons & ~buttons_pressed;
+    uint32_t buttons_released = prev_buttons & ~buttons_pressed;
 
     if (buttons_released != 0)
     {
