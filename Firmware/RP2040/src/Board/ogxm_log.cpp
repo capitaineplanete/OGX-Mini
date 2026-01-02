@@ -102,7 +102,8 @@ static inline bool is_webapp_mode() {
 
 void usb_log(const std::string& message) {
     // Completely non-blocking - if buffer full or not connected, just drop the log
-    if (!is_webapp_mode() || !tud_cdc_connected() || !tud_cdc_write_available()) {
+    // Works in ALL modes (not just WEBAPP)
+    if (!tud_cdc_connected() || !tud_cdc_write_available()) {
         return;
     }
 
@@ -121,7 +122,8 @@ void usb_log(const std::string& message) {
 }
 
 void usb_log(const char* fmt, ...) {
-    if (!is_webapp_mode() || !tud_cdc_connected()) {
+    // Works in ALL modes (not just WEBAPP)
+    if (!tud_cdc_connected()) {
         return;
     }
 
@@ -139,7 +141,8 @@ void usb_log(const char* fmt, ...) {
 }
 
 void usb_log_hex(const uint8_t* data, size_t size, const char* prefix) {
-    if (!is_webapp_mode() || !tud_cdc_connected()) {
+    // Works in ALL modes (not just WEBAPP)
+    if (!tud_cdc_connected()) {
         return;
     }
 

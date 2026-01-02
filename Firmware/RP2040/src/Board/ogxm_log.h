@@ -24,7 +24,7 @@ namespace ogxm_log {
     //Don't use this directly, use the OGXM_LOG_HEX macro
     void log_hex(const uint8_t* data, size_t size);
 
-    // USB CDC logging (only works in WEBAPP mode)
+    // USB CDC logging (works in ALL modes - PS3, Xbox, etc.)
     void usb_log(const std::string& message);
     void usb_log(const char* fmt, ...);
     void usb_log_hex(const uint8_t* data, size_t size, const char* prefix = nullptr);
