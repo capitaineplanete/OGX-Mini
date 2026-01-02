@@ -3,9 +3,9 @@
 
 #include "USBDevice/DeviceDriver/PS3/PS3.h"
 
-void PS3Device::initialize() 
+void PS3Device::initialize()
 {
-	class_driver_ = 
+	class_driver_ =
     {
 		.name = TUD_DRV_NAME("PS3"),
 		.init = hidd_init,
@@ -16,6 +16,8 @@ void PS3Device::initialize()
 		.xfer_cb = hidd_xfer_cb,
 		.sof = NULL
 	};
+	battery_combo_active_ = false;
+	battery_combo_end_ms_ = 0;
 }
 
 void PS3Device::process(const uint8_t idx, Gamepad& gamepad) 
@@ -87,21 +89,41 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.acceler_z = PS3::SIXAXIS_MID;
         report_in_.gyro_z = PS3::SIXAXIS_MID;
 
-        // Populate battery level (0-255 from controller → 0-100 and state for PS3)
-        // Optimized: shift instead of division (~3x faster on ARM Cortex-M)
-        uint8_t battery_percent = (static_cast<uint16_t>(gp_in.battery) * 100 + 128) >> 8;
-        report_in_.move_power_status = battery_percent;
+        // Battery combo detection: START + CROSS activates real battery reporting for 30s
+        const bool combo_pressed = (gp_in.buttons & (Gamepad::BUTTON_START | Gamepad::BUTTON_A)) ==
+                                    (Gamepad::BUTTON_START | Gamepad::BUTTON_A);
 
-        // Map to PS3 power state
-        // Treat 0 as unknown/unavailable and default to FULL to avoid false low battery warnings
-        if (gp_in.battery == 0 || battery_percent > 80) {
-            report_in_.power_status = PS3::PowerState::FULL;
-        } else if (battery_percent > 50) {
-            report_in_.power_status = PS3::PowerState::HIGH;
-        } else if (battery_percent > 20) {
-            report_in_.power_status = PS3::PowerState::DISCHARGING;
+        const uint32_t now_ms = time_us_32() / 1000;
+
+        if (combo_pressed && !battery_combo_active_) {
+            battery_combo_active_ = true;
+            battery_combo_end_ms_ = now_ms + 30000; // 30 seconds from now
+        }
+
+        // Check if 30s window expired
+        if (battery_combo_active_ && now_ms >= battery_combo_end_ms_) {
+            battery_combo_active_ = false;
+        }
+
+        // Default to CHARGING unless in active battery display window
+        if (battery_combo_active_) {
+            // Show real battery level during 30s window
+            uint8_t battery_percent = (static_cast<uint16_t>(gp_in.battery) * 100 + 128) >> 8;
+            report_in_.move_power_status = battery_percent;
+
+            if (gp_in.battery == 0 || battery_percent > 80) {
+                report_in_.power_status = PS3::PowerState::FULL;
+            } else if (battery_percent > 50) {
+                report_in_.power_status = PS3::PowerState::HIGH;
+            } else if (battery_percent > 20) {
+                report_in_.power_status = PS3::PowerState::DISCHARGING;
+            } else {
+                report_in_.power_status = PS3::PowerState::LOW;
+            }
         } else {
-            report_in_.power_status = PS3::PowerState::LOW;
+            // Default: show as charging (Pico is USB-connected to PS3)
+            report_in_.move_power_status = 100;
+            report_in_.power_status = PS3::PowerState::CHARGING;
         }
 
         if (gamepad.analog_enabled())

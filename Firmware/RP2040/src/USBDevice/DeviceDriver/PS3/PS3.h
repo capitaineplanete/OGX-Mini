@@ -27,6 +27,8 @@ private:
     PS3::BTInfo bt_info_;
     uint8_t ef_byte_;
     bool new_report_out_{false};
+    bool battery_combo_active_{false};
+    uint32_t battery_combo_end_ms_{0};
 };
 
 #endif // _PS3_DEVICE_H_
