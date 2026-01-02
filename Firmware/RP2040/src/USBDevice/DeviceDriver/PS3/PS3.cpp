@@ -89,15 +89,12 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
         report_in_.acceler_z = PS3::SIXAXIS_MID;
         report_in_.gyro_z = PS3::SIXAXIS_MID;
 
-        // Battery combo detection: START + CROSS activates real battery reporting for 30s
-        const bool combo_pressed = (gp_in.buttons & (Gamepad::BUTTON_START | Gamepad::BUTTON_A)) ==
-                                    (Gamepad::BUTTON_START | Gamepad::BUTTON_A);
-
+        // Battery combo signaled by Bluepad32 (handles LED + lightbar there)
         const uint32_t now_ms = time_us_32() / 1000;
 
-        if (combo_pressed && !battery_combo_active_) {
+        if (gp_in.battery_combo_triggered && !battery_combo_active_) {
             battery_combo_active_ = true;
-            battery_combo_end_ms_ = now_ms + 30000; // 30 seconds from now
+            battery_combo_end_ms_ = now_ms + 30000; // 30s real battery reporting
         }
 
         // Check if 30s window expired

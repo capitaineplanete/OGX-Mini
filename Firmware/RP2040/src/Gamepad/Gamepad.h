@@ -112,11 +112,14 @@ public:
         int16_t  gyro_z;
         // Battery level (0-255, 255 = full)
         uint8_t  battery;
+        // Battery display combo triggered (START + CROSS)
+        bool     battery_combo_triggered;
 
         PadIn()
         {
             std::memset(this, 0, sizeof(PadIn));
             battery = 255;  // Default to full battery to prevent false low battery warnings
+            battery_combo_triggered = false;
         }
     };
 
