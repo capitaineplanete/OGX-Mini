@@ -7,6 +7,7 @@
 #include <cstring>
 #include <hardware/flash.h>
 #include <pico/mutex.h>
+#include "USBDevice/DeviceDriver/DebugLogger/DebugLogger.h"
 
 /* Define NVS_SECTORS (number of sectors to allocate to storage) either here or with CMake */
 /* IMPORTANT: All write() calls MUST be from Core 0 only! */
@@ -31,9 +32,10 @@ public:
             return false;
         }
 
+        uint64_t start_us = time_us_64();
         mutex_enter_blocking(&nvs_mutex_);
 
-        for (uint32_t i = 1; i < MAX_ENTRIES; ++i) 
+        for (uint32_t i = 1; i < MAX_ENTRIES; ++i)
         {
             Entry* read_entry = get_entry(i);
 
@@ -42,6 +44,11 @@ public:
                 update_entry(i, key, value, len);
 
                 mutex_exit(&nvs_mutex_);
+
+                uint32_t duration_us = static_cast<uint32_t>(time_us_64() - start_us);
+                DebugLoggerDevice::log_flash_op("WRITE", key.c_str(), len);
+                DebugLoggerDevice::log_timing("flash_write", duration_us);
+
                 return true;
             }
         }
@@ -57,9 +64,10 @@ public:
             return false;
         }
 
+        uint64_t start_us = time_us_64();
         mutex_enter_blocking(&nvs_mutex_);
 
-        for (uint32_t i = 1; i < MAX_ENTRIES; ++i) 
+        for (uint32_t i = 1; i < MAX_ENTRIES; ++i)
         {
             Entry* read_entry = get_entry(i);
 
@@ -68,6 +76,11 @@ public:
                 std::memcpy(value, read_entry->value, len);
 
                 mutex_exit(&nvs_mutex_);
+
+                uint32_t duration_us = static_cast<uint32_t>(time_us_64() - start_us);
+                DebugLoggerDevice::log_flash_op("READ", key.c_str(), len);
+                DebugLoggerDevice::log_timing("flash_read", duration_us);
+
                 return true;
             }
             else if (!is_valid_entry(read_entry))
@@ -83,6 +96,7 @@ public:
 
     void erase_all()
     {
+        uint64_t start_us = time_us_64();
         mutex_enter_blocking(&nvs_mutex_);
 
         for (uint32_t i = 0; i < NVS_SECTORS; ++i)
@@ -100,6 +114,10 @@ public:
         }
 
         mutex_exit(&nvs_mutex_);
+
+        uint32_t duration_us = static_cast<uint32_t>(time_us_64() - start_us);
+        DebugLoggerDevice::log_flash_op("ERASE_ALL", "all", NVS_SECTORS * FLASH_SECTOR_SIZE);
+        DebugLoggerDevice::log_timing("flash_erase_all", duration_us);
     }
 
 private:

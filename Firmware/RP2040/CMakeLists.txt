@@ -69,6 +69,7 @@ set(SOURCES_BOARD
     ${SRC}/USBDevice/DeviceDriver/XboxOG/XboxOG_XR.cpp
     ${SRC}/USBDevice/DeviceDriver/DInput/DInput.cpp
     ${SRC}/USBDevice/DeviceDriver/WebApp/WebApp.cpp
+    ${SRC}/USBDevice/DeviceDriver/DebugLogger/DebugLogger.cpp
     ${SRC}/USBDevice/DeviceDriver/XInput/tud_xinput/tud_xinput.cpp
     ${SRC}/USBDevice/DeviceDriver/XboxOG/tud_xid/tud_xid.cpp
 )

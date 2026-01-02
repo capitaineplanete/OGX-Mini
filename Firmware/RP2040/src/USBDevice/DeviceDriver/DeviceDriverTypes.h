@@ -15,7 +15,8 @@ enum class DeviceDriverType : uint8_t
     PSCLASSIC,
     SWITCH,
     WEBAPP = 100,
-    UART_BRIDGE
+    UART_BRIDGE,
+    DEBUG_LOGGER
 };
 
 #endif // _DEVICE_DRIVER_TYPES_H_

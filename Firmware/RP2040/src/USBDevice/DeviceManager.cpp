@@ -10,6 +10,7 @@
 #include "USBDevice/DeviceDriver/XboxOG/XboxOG_SB.h"
 #include "USBDevice/DeviceDriver/XboxOG/XboxOG_XR.h"
 #include "USBDevice/DeviceDriver/WebApp/WebApp.h"
+#include "USBDevice/DeviceDriver/DebugLogger/DebugLogger.h"
 #include "USBDevice/DeviceManager.h"
 
 #if defined(CONFIG_EN_UART_BRIDGE)
@@ -51,6 +52,9 @@ void DeviceManager::initialize_driver(  DeviceDriverType driver_type,
             break;
         case DeviceDriverType::WEBAPP:
             device_driver_ = std::make_unique<WebAppDevice>();
+            break;
+        case DeviceDriverType::DEBUG_LOGGER:
+            device_driver_ = std::make_unique<DebugLoggerDevice>();
             break;
 #if defined(CONFIG_EN_UART_BRIDGE)
         case DeviceDriverType::UART_BRIDGE:

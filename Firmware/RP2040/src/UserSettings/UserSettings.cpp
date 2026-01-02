@@ -14,43 +14,47 @@ static constexpr uint32_t BUTTON_COMBO(const uint16_t& buttons, const uint8_t& d
 }
 
 namespace ButtonCombo {
-    static constexpr uint32_t PS3       = BUTTON_COMBO(Gamepad::BUTTON_START, Gamepad::DPAD_LEFT);
-    static constexpr uint32_t DINPUT    = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_RB, Gamepad::DPAD_LEFT);
-    static constexpr uint32_t XINPUT    = BUTTON_COMBO(Gamepad::BUTTON_START, Gamepad::DPAD_UP);
-    static constexpr uint32_t SWITCH    = BUTTON_COMBO(Gamepad::BUTTON_START, Gamepad::DPAD_DOWN);
-    static constexpr uint32_t XBOXOG    = BUTTON_COMBO(Gamepad::BUTTON_START, Gamepad::DPAD_RIGHT);
-    static constexpr uint32_t XBOXOG_SB = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_RB, Gamepad::DPAD_RIGHT);
-    static constexpr uint32_t XBOXOG_XR = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_LB, Gamepad::DPAD_RIGHT);
-    static constexpr uint32_t PSCLASSIC = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_A);
-    static constexpr uint32_t WEBAPP    = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_LB | Gamepad::BUTTON_RB);
+    static constexpr uint32_t PS3          = BUTTON_COMBO(Gamepad::BUTTON_START, Gamepad::DPAD_LEFT);
+    static constexpr uint32_t DINPUT       = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_RB, Gamepad::DPAD_LEFT);
+    static constexpr uint32_t XINPUT       = BUTTON_COMBO(Gamepad::BUTTON_START, Gamepad::DPAD_UP);
+    static constexpr uint32_t SWITCH       = BUTTON_COMBO(Gamepad::BUTTON_START, Gamepad::DPAD_DOWN);
+    static constexpr uint32_t XBOXOG       = BUTTON_COMBO(Gamepad::BUTTON_START, Gamepad::DPAD_RIGHT);
+    static constexpr uint32_t XBOXOG_SB    = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_RB, Gamepad::DPAD_RIGHT);
+    static constexpr uint32_t XBOXOG_XR    = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_LB, Gamepad::DPAD_RIGHT);
+    static constexpr uint32_t PSCLASSIC    = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_A);
+    static constexpr uint32_t WEBAPP       = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_LB | Gamepad::BUTTON_RB);
+    static constexpr uint32_t DEBUG_LOGGER = BUTTON_COMBO(Gamepad::BUTTON_START | Gamepad::BUTTON_X);
 };
 
 static constexpr DeviceDriverType VALID_DRIVER_TYPES[] = {
 #if defined(CONFIG_EN_4CH)
-    DeviceDriverType::XBOXOG, 
-    DeviceDriverType::XBOXOG_SB, 
+    DeviceDriverType::XBOXOG,
+    DeviceDriverType::XBOXOG_SB,
     DeviceDriverType::XINPUT,
     DeviceDriverType::PS3,
-    DeviceDriverType::PSCLASSIC, 
+    DeviceDriverType::PSCLASSIC,
     DeviceDriverType::WEBAPP,
+    DeviceDriverType::DEBUG_LOGGER,
     #if defined(XREMOTE_ROM_AVAILABLE)
     DeviceDriverType::XBOXOG_XR,
     #endif
 
 #elif MAX_GAMEPADS > 1
-    DeviceDriverType::DINPUT, 
-    DeviceDriverType::SWITCH, 
+    DeviceDriverType::DINPUT,
+    DeviceDriverType::SWITCH,
     DeviceDriverType::WEBAPP,
+    DeviceDriverType::DEBUG_LOGGER,
 
 #else // MAX_GAMEPADS == 1
-    DeviceDriverType::XBOXOG, 
-    DeviceDriverType::XBOXOG_SB, 
-    DeviceDriverType::DINPUT, 
-    DeviceDriverType::SWITCH, 
+    DeviceDriverType::XBOXOG,
+    DeviceDriverType::XBOXOG_SB,
+    DeviceDriverType::DINPUT,
+    DeviceDriverType::SWITCH,
     DeviceDriverType::WEBAPP,
     DeviceDriverType::PS3,
-    DeviceDriverType::PSCLASSIC, 
+    DeviceDriverType::PSCLASSIC,
     DeviceDriverType::XINPUT,
+    DeviceDriverType::DEBUG_LOGGER,
     #if defined(XREMOTE_ROM_AVAILABLE)
     DeviceDriverType::XBOXOG_XR,
     #endif
@@ -63,16 +67,17 @@ struct ComboMap {
     DeviceDriverType driver; 
 };
 
-static constexpr std::array<ComboMap, 9> BUTTON_COMBO_MAP = {{
-    { ButtonCombo::XBOXOG,    DeviceDriverType::XBOXOG    },
-    { ButtonCombo::XBOXOG_SB, DeviceDriverType::XBOXOG_SB },
-    { ButtonCombo::XBOXOG_XR, DeviceDriverType::XBOXOG_XR },
-    { ButtonCombo::WEBAPP,    DeviceDriverType::WEBAPP    },
-    { ButtonCombo::DINPUT,    DeviceDriverType::DINPUT    },
-    { ButtonCombo::SWITCH,    DeviceDriverType::SWITCH    },
-    { ButtonCombo::XINPUT,    DeviceDriverType::XINPUT    },
-    { ButtonCombo::PS3,       DeviceDriverType::PS3       },
-    { ButtonCombo::PSCLASSIC, DeviceDriverType::PSCLASSIC }
+static constexpr std::array<ComboMap, 10> BUTTON_COMBO_MAP = {{
+    { ButtonCombo::XBOXOG,       DeviceDriverType::XBOXOG       },
+    { ButtonCombo::XBOXOG_SB,    DeviceDriverType::XBOXOG_SB    },
+    { ButtonCombo::XBOXOG_XR,    DeviceDriverType::XBOXOG_XR    },
+    { ButtonCombo::WEBAPP,       DeviceDriverType::WEBAPP       },
+    { ButtonCombo::DINPUT,       DeviceDriverType::DINPUT       },
+    { ButtonCombo::SWITCH,       DeviceDriverType::SWITCH       },
+    { ButtonCombo::XINPUT,       DeviceDriverType::XINPUT       },
+    { ButtonCombo::PS3,          DeviceDriverType::PS3          },
+    { ButtonCombo::PSCLASSIC,    DeviceDriverType::PSCLASSIC    },
+    { ButtonCombo::DEBUG_LOGGER, DeviceDriverType::DEBUG_LOGGER }
 }};
 
 const std::string UserSettings::INIT_FLAG_KEY()
