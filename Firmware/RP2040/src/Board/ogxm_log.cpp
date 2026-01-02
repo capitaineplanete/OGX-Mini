@@ -91,6 +91,7 @@ void log_hex(const uint8_t* data, size_t size) {
 // USB CDC logging - works regardless of CONFIG_OGXM_DEBUG, only in WEBAPP mode
 #include "class/cdc/cdc_device.h"
 #include "UserSettings/UserSettings.h"
+#include <iomanip>
 
 namespace ogxm_log {
 
