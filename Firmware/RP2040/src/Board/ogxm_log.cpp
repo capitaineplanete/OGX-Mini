@@ -92,6 +92,7 @@ void log_hex(const uint8_t* data, size_t size) {
 #include "class/cdc/cdc_device.h"
 #include "UserSettings/UserSettings.h"
 #include <iomanip>
+#include <cstdarg>
 
 namespace ogxm_log {
 
