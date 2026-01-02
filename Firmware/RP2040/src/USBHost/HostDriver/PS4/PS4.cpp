@@ -17,6 +17,14 @@ void PS4Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, co
 
 void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report, uint16_t len)
 {
+    // DS4 sends different report IDs: 0x01 (basic) and 0x11 (extended with touchpad/gyro)
+    // Only process basic report 0x01 - extended format has different byte layout
+    if (len < 1 || report[0] != 0x01)
+    {
+        tuh_hid_receive_report(address, instance);
+        return;
+    }
+
     std::memcpy(&in_report_, report, std::min(static_cast<size_t>(len), sizeof(PS4::InReport)));
     in_report_.buttons[2] &= PS4::COUNTER_MASK;
 
