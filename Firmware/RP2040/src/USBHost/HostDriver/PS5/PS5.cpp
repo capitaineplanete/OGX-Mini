@@ -34,6 +34,7 @@ void PS5Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
 {
     const PS5::InReport* in_report = reinterpret_cast<const PS5::InReport*>(report);
 
+    // Compare relevant fields to detect actual changes (joysticks + buttons)
     if (std::memcmp(&prev_in_report_.joystick_lx, &in_report->joystick_lx, sizeof(uint8_t) * 6) == 0 &&
         std::memcmp(prev_in_report_.buttons, in_report->buttons, sizeof(in_report->buttons)) == 0)
     {

@@ -19,8 +19,11 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
 {
     std::memcpy(&in_report_, report, std::min(static_cast<size_t>(len), sizeof(PS4::InReport)));
     in_report_.buttons[2] &= PS4::COUNTER_MASK;
-    if (std::memcmp(reinterpret_cast<const PS4::InReport*>(report), &prev_in_report_, sizeof(PS4::InReport)) == 0)
+
+    // Compare masked report (not raw) to prevent counter from causing false changes
+    if (std::memcmp(&in_report_, &prev_in_report_, sizeof(PS4::InReport)) == 0)
     {
+        tuh_hid_receive_report(address, instance);
         return;
     }
 
