@@ -1,45 +1,26 @@
 #include "DebugLogger.h"
-#include "Descriptors/DeviceDescriptors.h"
-#include "class/cdc/cdc.h"
+#include "Descriptors/CDCDev.h"
+#include "class/cdc/cdc_device.h"
+#include "bsp/board_api.h"
+#include <cstring>
 
 // Static ring buffer instance
 DebugLoggerDevice::RingBuffer DebugLoggerDevice::ring_buffer_;
 
-// USB descriptors for CDC ACM
-static const tusb_desc_device_t debug_logger_desc_device = {
-    .bLength            = sizeof(tusb_desc_device_t),
-    .bDescriptorType    = TUSB_DESC_DEVICE,
-    .bcdUSB             = 0x0200,
-    .bDeviceClass       = TUSB_CLASS_MISC,
-    .bDeviceSubClass    = MISC_SUBCLASS_COMMON,
-    .bDeviceProtocol    = MISC_PROTOCOL_IAD,
-    .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
-    .idVendor           = 0xCAFE,
-    .idProduct          = 0x4011,
-    .bcdDevice          = 0x0100,
-    .iManufacturer      = 0x01,
-    .iProduct           = 0x02,
-    .iSerialNumber      = 0x03,
-    .bNumConfigurations = 0x01
-};
-
-enum {
-    ITF_NUM_CDC = 0,
-    ITF_NUM_CDC_DATA,
-    ITF_NUM_TOTAL
-};
-
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
-#define EPNUM_CDC_NOTIF 0x81
-#define EPNUM_CDC_OUT   0x02
-#define EPNUM_CDC_IN    0x82
-
-static const uint8_t debug_logger_desc_cfg[] = {
-    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64)
-};
-
 void DebugLoggerDevice::initialize() {
+    class_driver_ =
+    {
+        .name = TUD_DRV_NAME("DEBUG_LOGGER"),
+        .init = cdcd_init,
+        .deinit = cdcd_deinit,
+        .reset = cdcd_reset,
+        .open = cdcd_open,
+        .control_xfer_cb = cdcd_control_xfer_cb,
+        .xfer_cb = cdcd_xfer_cb,
+        .sof = NULL
+    };
+
+
     log_event("=== DEBUG LOGGER INITIALIZED ===");
     log_event("Format: [timestamp_us] CHAN: data");
     log_event("Channels: BTN=Buttons, JOY=Joysticks, TRIG=Triggers, BAT=Battery, RUM=Rumble, FLASH=Flash, TIME=Timing, EVT=Event");
@@ -412,23 +393,46 @@ bool DebugLoggerDevice::vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tu
 }
 
 const uint16_t* DebugLoggerDevice::get_descriptor_string_cb(uint8_t index, uint16_t langid) {
-    static uint16_t desc_str[32];
+    static uint16_t desc_str[32 + 1];
+    size_t char_count = 0;
 
-    const char* str;
     switch (index) {
-        case 0: return DeviceDescriptors::STRING_LANG;
-        case 1: str = "OGX-Mini"; break;
-        case 2: str = "Debug Logger"; break;
-        case 3: str = "DEBUG001"; break;
-        case 4: str = "Debug CDC"; break;
-        default: return nullptr;
+        case 0:
+            std::memcpy(&desc_str[1], CDCDesc::DESC_STRING[0], 2);
+            char_count = 1;
+            break;
+        case 1:
+        case 2:
+        case 4:
+        {
+            const uint8_t* str = CDCDesc::DESC_STRING[index];
+            if (!str) return nullptr;
+
+            char_count = std::strlen(reinterpret_cast<const char*>(str));
+            for (size_t i = 0; i < char_count; ++i) {
+                desc_str[1 + i] = str[i];
+            }
+            break;
+        }
+        case 3: // Serial number - use "DEBUG_LOGGER"
+        {
+            const char* str = "DEBUG_LOGGER";
+            char_count = std::strlen(str);
+            for (size_t i = 0; i < char_count; ++i) {
+                desc_str[1 + i] = str[i];
+            }
+            break;
+        }
+        default:
+            return nullptr;
     }
 
-    return get_string_descriptor(str, index);
+    desc_str[0] = static_cast<uint16_t>((TUSB_DESC_STRING << 8) | (2 * char_count + 2));
+    return desc_str;
 }
 
 const uint8_t* DebugLoggerDevice::get_descriptor_device_cb() {
-    return reinterpret_cast<const uint8_t*>(&debug_logger_desc_device);
+    return reinterpret_cast<const uint8_t*>(&CDCDesc::DESC_DEVICE);
 }
 
 const uint8_t* DebugLoggerDevice::get_hid_descriptor_report_cb(uint8_t itf) {
@@ -436,7 +440,7 @@ const uint8_t* DebugLoggerDevice::get_hid_descriptor_report_cb(uint8_t itf) {
 }
 
 const uint8_t* DebugLoggerDevice::get_descriptor_configuration_cb(uint8_t index) {
-    return debug_logger_desc_cfg;
+    return CDCDesc::DESC_CONFIG;
 }
 
 const uint8_t* DebugLoggerDevice::get_descriptor_device_qualifier_cb() {
