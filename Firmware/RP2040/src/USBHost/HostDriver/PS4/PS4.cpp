@@ -5,12 +5,17 @@
 #include "class/hid/hid_host.h"
 
 #include "USBHost/HostDriver/PS4/PS4.h"
+#include "Board/ogxm_log.h"
 
-void PS4Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report_desc, uint16_t desc_len) 
+void PS4Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report_desc, uint16_t desc_len)
 {
+    OGXM_USB_LOG("[DS4] INIT: Controller connected @ addr=%d inst=%d\n", address, instance);
+
     out_report_.report_id = 0x05;
     out_report_.set_led = 1;
     out_report_.lightbar_blue = 0xFF / 2;
+
+    OGXM_USB_LOG("[DS4] INIT: Lightbar set to BLUE, awaiting reports\n");
 
     tuh_hid_receive_report(address, instance);
 }
@@ -21,12 +26,21 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     // Only process basic report 0x01 - extended format has different byte layout
     if (len < 1 || report[0] != 0x01)
     {
+        OGXM_USB_LOG("[DS4] Rejected report: ID=0x%02X len=%d (expected ID=0x01)\n",
+                     len > 0 ? report[0] : 0, len);
         tuh_hid_receive_report(address, instance);
         return;
     }
 
     std::memcpy(&in_report_, report, std::min(static_cast<size_t>(len), sizeof(PS4::InReport)));
     in_report_.buttons[2] &= PS4::COUNTER_MASK;
+
+    // Log raw input (before stabilization) for diagnostics
+    OGXM_USB_LOG("[DS4] RAW: Lstick(%d,%d) Rstick(%d,%d) Dpad=0x%X Btns=0x%02X%02X%02X\n",
+                 in_report_.joystick_lx, in_report_.joystick_ly,
+                 in_report_.joystick_rx, in_report_.joystick_ry,
+                 in_report_.buttons[0] & PS4::DPAD_MASK,
+                 in_report_.buttons[0], in_report_.buttons[1], in_report_.buttons[2]);
 
     // Stabilize joystick inputs to prevent Bluetooth noise from triggering phantom movement
     // Snap values near center (126-130) to exact center (128) before processing
@@ -40,24 +54,46 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
         return (diff <= (TOLERANCE * 2)) ? CENTER : value;
     };
 
+    // Track and log stabilization corrections
+    uint8_t orig_lx = in_report_.joystick_lx, orig_ly = in_report_.joystick_ly;
+    uint8_t orig_rx = in_report_.joystick_rx, orig_ry = in_report_.joystick_ry;
+
     in_report_.joystick_lx = snap_to_center(in_report_.joystick_lx);
     in_report_.joystick_ly = snap_to_center(in_report_.joystick_ly);
     in_report_.joystick_rx = snap_to_center(in_report_.joystick_rx);
     in_report_.joystick_ry = snap_to_center(in_report_.joystick_ry);
+
+    if (orig_lx != in_report_.joystick_lx || orig_ly != in_report_.joystick_ly ||
+        orig_rx != in_report_.joystick_rx || orig_ry != in_report_.joystick_ry)
+    {
+        OGXM_USB_LOG("[DS4] STAB: L(%d,%d→%d,%d) R(%d,%d→%d,%d) [Noise corrected]\n",
+                     orig_lx, orig_ly, in_report_.joystick_lx, in_report_.joystick_ly,
+                     orig_rx, orig_ry, in_report_.joystick_rx, in_report_.joystick_ry);
+    }
 
     // Validate D-pad HAT value: only 0x00-0x08 are valid (directions + center)
     // Bluetooth corruption can cause invalid values (0x09-0x0F) → force to center
     uint8_t dpad_value = in_report_.buttons[0] & PS4::DPAD_MASK;
     if (dpad_value > PS4::Buttons0::DPAD_CENTER)
     {
+        OGXM_USB_LOG("[DS4] DPAD: Invalid HAT=0x%X → forced to CENTER [Corruption detected]\n", dpad_value);
         in_report_.buttons[0] = (in_report_.buttons[0] & ~PS4::DPAD_MASK) | PS4::Buttons0::DPAD_CENTER;
     }
 
     // Compare masked report (not raw) to prevent counter from causing false changes
     if (std::memcmp(&in_report_, &prev_in_report_, sizeof(PS4::InReport)) == 0)
     {
+        OGXM_USB_LOG("[DS4] DEDUP: Report identical to previous → skipped\n");
         tuh_hid_receive_report(address, instance);
         return;
+    }
+
+    OGXM_USB_LOG("[DS4] PROC: Processing new report\n");
+
+    // Detect phantom L3+R3 simultaneous presses (common corruption pattern)
+    if ((in_report_.buttons[1] & PS4::Buttons1::L3) && (in_report_.buttons[1] & PS4::Buttons1::R3))
+    {
+        OGXM_USB_LOG("[DS4] WARN: L3+R3 simultaneous press detected! [Possible phantom]\n");
     }
 
     Gamepad::PadIn gp_in;   
@@ -105,6 +141,8 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     if (in_report_.buttons[2] & PS4::Buttons2::PS)       gp_in.buttons |= gamepad.MAP_BUTTON_SYS;
     if (in_report_.buttons[2] & PS4::Buttons2::TP)       gp_in.buttons |= gamepad.MAP_BUTTON_MISC;
 
+    OGXM_USB_LOG("[DS4] TRIG: L2=%d R2=%d (raw)\n", in_report_.trigger_l, in_report_.trigger_r);
+
     gp_in.trigger_l = gamepad.scale_trigger_l(in_report_.trigger_l);
     gp_in.trigger_r = gamepad.scale_trigger_r(in_report_.trigger_r);
 
@@ -120,6 +158,13 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     gp_in.analog[gamepad.MAP_ANALOG_OFF_LB] = (gp_in.buttons & gamepad.MAP_BUTTON_LB) ? 0xFF : 0;
     gp_in.analog[gamepad.MAP_ANALOG_OFF_RB] = (gp_in.buttons & gamepad.MAP_BUTTON_RB) ? 0xFF : 0;
 
+    // Log final scaled/processed values before sending to gamepad
+    OGXM_USB_LOG("[DS4] OUT: Lstick(%d,%d) Rstick(%d,%d) Trig(%d,%d) Btns=0x%04X Dpad=0x%02X\n",
+                 gp_in.joystick_lx, gp_in.joystick_ly,
+                 gp_in.joystick_rx, gp_in.joystick_ry,
+                 gp_in.trigger_l, gp_in.trigger_r,
+                 gp_in.buttons, gp_in.dpad);
+
     gamepad.set_pad_in(gp_in);
 
     tuh_hid_receive_report(address, instance);
@@ -132,6 +177,11 @@ bool PS4Host::send_feedback(Gamepad& gamepad, uint8_t address, uint8_t instance)
     out_report_.motor_left = gp_out.rumble_l;
     out_report_.motor_right = gp_out.rumble_r;
     out_report_.set_rumble = (out_report_.motor_left != 0 || out_report_.motor_right != 0) ? 1 : 0;
+
+    if (out_report_.motor_left != 0 || out_report_.motor_right != 0)
+    {
+        OGXM_USB_LOG("[DS4] RUMBLE: L=%d R=%d\n", out_report_.motor_left, out_report_.motor_right);
+    }
 
     if (tuh_hid_send_report(address, instance, 0, reinterpret_cast<const uint8_t*>(&out_report_), sizeof(PS4::OutReport)))
     {

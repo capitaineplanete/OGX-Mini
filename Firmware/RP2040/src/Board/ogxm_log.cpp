@@ -87,3 +87,75 @@ void log_hex(const uint8_t* data, size_t size) {
 } // namespace ogxm_log
 
 #endif // defined(CONFIG_OGXM_DEBUG)
+
+// USB CDC logging - works regardless of CONFIG_OGXM_DEBUG, only in WEBAPP mode
+#include "class/cdc/cdc_device.h"
+#include "UserSettings/UserSettings.h"
+
+namespace ogxm_log {
+
+static inline bool is_webapp_mode() {
+    return UserSettings::get_instance().get_current_driver() == DeviceDriverType::WEBAPP;
+}
+
+void usb_log(const std::string& message) {
+    if (!is_webapp_mode() || !tud_cdc_connected()) {
+        return;
+    }
+
+    const char* msg = message.c_str();
+    size_t len = message.length();
+    size_t written = 0;
+
+    while (written < len) {
+        if (!tud_cdc_connected()) break;
+
+        size_t chunk = tud_cdc_write(msg + written, len - written);
+        written += chunk;
+
+        if (chunk > 0) {
+            tud_cdc_write_flush();
+        }
+    }
+}
+
+void usb_log(const char* fmt, ...) {
+    if (!is_webapp_mode() || !tud_cdc_connected()) {
+        return;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+
+    char buffer[512];
+    int len = vsnprintf(buffer, sizeof(buffer), fmt, args);
+
+    if (len > 0 && len < (int)sizeof(buffer)) {
+        usb_log(std::string(buffer));
+    }
+
+    va_end(args);
+}
+
+void usb_log_hex(const uint8_t* data, size_t size, const char* prefix) {
+    if (!is_webapp_mode() || !tud_cdc_connected()) {
+        return;
+    }
+
+    std::ostringstream hex_stream;
+
+    if (prefix) {
+        hex_stream << prefix << ": ";
+    }
+
+    hex_stream << std::hex << std::setfill('0');
+    for (size_t i = 0; i < size; ++i) {
+        hex_stream << std::setw(2) << static_cast<int>(data[i]);
+        if (i < size - 1) hex_stream << " ";
+    }
+    hex_stream << "\n";
+
+    usb_log(hex_stream.str());
+}
+
+} // namespace ogxm_log
