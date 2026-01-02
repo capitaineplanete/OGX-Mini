@@ -168,16 +168,16 @@ static void hsv_to_rgb(int16_t h, uint8_t s, uint8_t v, uint8_t& r, uint8_t& g, 
     }
 }
 
-// Helper: Double blink Pico LED (non-blocking)
+// Helper: Double blink Pico LED (ends in ON state, matches mode selection pattern)
 static void led_double_blink()
 {
-    board_api::set_led(true);
-    sleep_ms(100);
     board_api::set_led(false);
     sleep_ms(100);
     board_api::set_led(true);
     sleep_ms(100);
     board_api::set_led(false);
+    sleep_ms(100);
+    board_api::set_led(true);  // End in ON state
 }
 
 // Helper: Get battery color (green/orange/red based on level)
@@ -419,13 +419,13 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
 
-    // DS4 Lightbar control: START + CROSS = battery display, START + R2 = color selection
+    // DS4 Lightbar control: START + SELECT = battery display, START + R2 = color selection
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         LightbarSettings& lb = lightbar_[idx];
         const uint32_t now_ms = board_api::ms_since_boot();
 
-        // Detect START + CROSS combo (battery display mode)
-        const bool battery_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->buttons & BUTTON_A);
+        // Detect START + SELECT combo (battery display mode)
+        const bool battery_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->misc_buttons & MISC_BUTTON_BACK);
 
         // Detect START + R2 combo (color selection mode)
         const bool color_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > 200);
@@ -450,7 +450,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             }
 
             // Intercept combo - don't send to host
-            gp_in.buttons &= ~(gamepad->MAP_BUTTON_START | gamepad->MAP_BUTTON_A);
+            gp_in.buttons &= ~(gamepad->MAP_BUTTON_START | gamepad->MAP_BUTTON_BACK);
             prev_battery_combo[idx] = true;
         } else {
             static bool prev_battery_combo[MAX_GAMEPADS] = {false};
@@ -495,45 +495,30 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             static int16_t prev_joy_x[MAX_GAMEPADS] = {0};
             static int16_t prev_joy_y[MAX_GAMEPADS] = {0};
             bool color_changed = false;
-            bool joy_used = false;
+            bool should_rumble = false;
             uint8_t r, g, b;
 
             // NOTE: Touchpad code commented out (causes Pico crashes)
-            /*
-            int32_t delta_x = controller->mouse.delta_x;
-            int32_t delta_y = controller->mouse.delta_y;
-            if (delta_x != 0 || delta_y != 0) {
-                lb.hue = (lb.hue + delta_x / 4) % 360;
-                if (lb.hue < 0) lb.hue += 360;
-                int new_sat = lb.sat - (delta_y / 2);
-                lb.sat = static_cast<uint8_t>(std::min(255, std::max(0, new_sat)));
-                hsv_to_rgb(lb.hue, lb.sat, lb.brightness, r, g, b);
-                set_target_color(idx, r, g, b);
-                color_changed = true;
-            }
-            */
+            // Would have provided smooth HSV color wheel control via touchpad
 
-            // Left Joystick: same as DPAD (LEFT/RIGHT=color, UP/DOWN=brightness)
+            // Left Joystick: Smooth HSV color wheel slider (LEFT/RIGHT=hue, UP/DOWN=brightness)
             int16_t joy_x = uni_gp->axis_x - 512;  // Center at 0
             int16_t joy_y = uni_gp->axis_y - 512;
 
             if (abs(joy_x) > 300 || abs(joy_y) > 300) {  // Deadzone
-                if (joy_x < -300 && prev_joy_x[idx] >= -300) {
-                    lb.color_index = (lb.color_index == 0) ? 11 : lb.color_index - 1;
+                // X-axis: Adjust hue (smooth color wheel 0-360)
+                if (abs(joy_x) > 300) {
+                    lb.hue -= (joy_x / 100);  // Scale joystick to hue steps
+                    if (lb.hue < 0) lb.hue += 360;
+                    lb.hue = lb.hue % 360;
                     color_changed = true;
-                    joy_used = true;
-                } else if (joy_x > 300 && prev_joy_x[idx] <= 300) {
-                    lb.color_index = (lb.color_index + 1) % 12;
+                    if (joy_x != prev_joy_x[idx]) should_rumble = true;  // Only rumble on change
+                }
+                // Y-axis: Adjust brightness
+                if (abs(joy_y) > 300) {
+                    int new_brightness = lb.brightness - (joy_y / 100);
+                    lb.brightness = static_cast<uint8_t>(std::min(255, std::max(10, new_brightness)));
                     color_changed = true;
-                    joy_used = true;
-                } else if (joy_y < -300 && prev_joy_y[idx] >= -300) {
-                    lb.brightness = std::min(255, lb.brightness + 30);  // Faster: 25->30
-                    color_changed = true;
-                    joy_used = true;
-                } else if (joy_y > 300 && prev_joy_y[idx] <= 300) {
-                    lb.brightness = std::max(10, lb.brightness - 30);
-                    color_changed = true;
-                    joy_used = true;
                 }
                 prev_joy_x[idx] = joy_x;
                 prev_joy_y[idx] = joy_y;
@@ -542,31 +527,34 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 prev_joy_y[idx] = 0;
             }
 
-            // DPAD: cycle presets (faster: triggers on every frame held, not just press)
+            // DPAD: Smooth HSV color wheel slider (slower: 10 frames repeat delay)
             if (!color_changed) {
                 static uint8_t dpad_repeat_delay[MAX_GAMEPADS] = {0};
 
                 if (uni_gp->dpad == DPAD_LEFT) {
-                    if (prev_dpad[idx] != DPAD_LEFT || dpad_repeat_delay[idx]++ > 3) {  // Faster: 3 frames
-                        lb.color_index = (lb.color_index == 0) ? 11 : lb.color_index - 1;
+                    if (prev_dpad[idx] != DPAD_LEFT || dpad_repeat_delay[idx]++ > 10) {
+                        lb.hue = (lb.hue - 5) % 360;  // Slide through color wheel
+                        if (lb.hue < 0) lb.hue += 360;
                         color_changed = true;
+                        should_rumble = true;  // Rumble on color change
                         dpad_repeat_delay[idx] = 0;
                     }
                 } else if (uni_gp->dpad == DPAD_RIGHT) {
-                    if (prev_dpad[idx] != DPAD_RIGHT || dpad_repeat_delay[idx]++ > 3) {
-                        lb.color_index = (lb.color_index + 1) % 12;
+                    if (prev_dpad[idx] != DPAD_RIGHT || dpad_repeat_delay[idx]++ > 10) {
+                        lb.hue = (lb.hue + 5) % 360;
                         color_changed = true;
+                        should_rumble = true;
                         dpad_repeat_delay[idx] = 0;
                     }
                 } else if (uni_gp->dpad == DPAD_UP) {
-                    if (prev_dpad[idx] != DPAD_UP || dpad_repeat_delay[idx]++ > 3) {
-                        lb.brightness = std::min(255, lb.brightness + 30);
+                    if (prev_dpad[idx] != DPAD_UP || dpad_repeat_delay[idx]++ > 10) {
+                        lb.brightness = std::min(255, lb.brightness + 15);
                         color_changed = true;
                         dpad_repeat_delay[idx] = 0;
                     }
                 } else if (uni_gp->dpad == DPAD_DOWN) {
-                    if (prev_dpad[idx] != DPAD_DOWN || dpad_repeat_delay[idx]++ > 3) {
-                        lb.brightness = std::max(10, lb.brightness - 30);
+                    if (prev_dpad[idx] != DPAD_DOWN || dpad_repeat_delay[idx]++ > 10) {
+                        lb.brightness = std::max(10, lb.brightness - 15);
                         color_changed = true;
                         dpad_repeat_delay[idx] = 0;
                     }
@@ -576,15 +564,21 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             }
 
             if (color_changed) {
-                calculate_color(idx, r, g, b);
+                hsv_to_rgb(lb.hue, lb.sat, lb.brightness, r, g, b);
                 set_target_color(idx, r, g, b);
             }
 
-            // Rumble feedback when joystick used (low intensity)
-            if (joy_used) {
+            // Rumble ONLY when actively changing color via LEFT/RIGHT (not brightness)
+            if (should_rumble) {
                 Gamepad::PadOut gp_out;
-                gp_out.rumble_l = 30;  // Low rumble
+                gp_out.rumble_l = 30;  // Low rumble pulse
                 gp_out.rumble_r = 30;
+                gamepad->set_pad_out(gp_out);
+            } else {
+                // Stop rumble when not changing
+                Gamepad::PadOut gp_out;
+                gp_out.rumble_l = 0;
+                gp_out.rumble_r = 0;
                 gamepad->set_pad_out(gp_out);
             }
 
