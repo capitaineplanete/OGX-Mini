@@ -7,10 +7,16 @@
 #include <cstring>
 #include <hardware/flash.h>
 #include <pico/mutex.h>
-#include "USBDevice/DeviceDriver/DebugLogger/DebugLogger.h"
 
 /* Define NVS_SECTORS (number of sectors to allocate to storage) either here or with CMake */
 /* IMPORTANT: All write() calls MUST be from Core 0 only! */
+
+// Forward declarations for debug logger (avoid header conflicts with BTStack)
+class DebugLoggerDevice {
+public:
+    static void log_flash_op(const char* operation, const char* key, size_t len);
+    static void log_timing(const char* operation, uint32_t duration_us);
+};
 
 class NVSTool
 {
