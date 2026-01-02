@@ -28,6 +28,31 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     std::memcpy(&in_report_, report, std::min(static_cast<size_t>(len), sizeof(PS4::InReport)));
     in_report_.buttons[2] &= PS4::COUNTER_MASK;
 
+    // Stabilize joystick inputs to prevent Bluetooth noise from triggering phantom movement
+    // Snap values near center (126-130) to exact center (128) before processing
+    // This prevents oscillating noise (127↔128↔129) from bypassing memcmp deduplication
+    constexpr uint8_t CENTER = PS4::JOYSTICK_MID;
+    constexpr uint8_t TOLERANCE = 2;
+
+    auto snap_to_center = [](uint8_t value) -> uint8_t {
+        // Branchless: ((value - 126) <= 4) ? 128 : value
+        uint8_t diff = value - (CENTER - TOLERANCE);
+        return (diff <= (TOLERANCE * 2)) ? CENTER : value;
+    };
+
+    in_report_.joystick_lx = snap_to_center(in_report_.joystick_lx);
+    in_report_.joystick_ly = snap_to_center(in_report_.joystick_ly);
+    in_report_.joystick_rx = snap_to_center(in_report_.joystick_rx);
+    in_report_.joystick_ry = snap_to_center(in_report_.joystick_ry);
+
+    // Validate D-pad HAT value: only 0x00-0x08 are valid (directions + center)
+    // Bluetooth corruption can cause invalid values (0x09-0x0F) → force to center
+    uint8_t dpad_value = in_report_.buttons[0] & PS4::DPAD_MASK;
+    if (dpad_value > PS4::Buttons0::DPAD_CENTER)
+    {
+        in_report_.buttons[0] = (in_report_.buttons[0] & ~PS4::DPAD_MASK) | PS4::Buttons0::DPAD_CENTER;
+    }
+
     // Compare masked report (not raw) to prevent counter from causing false changes
     if (std::memcmp(&in_report_, &prev_in_report_, sizeof(PS4::InReport)) == 0)
     {
