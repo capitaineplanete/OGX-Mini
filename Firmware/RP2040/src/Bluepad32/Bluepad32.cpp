@@ -40,14 +40,15 @@ struct LightbarSettings {
     uint8_t brightness{10};     // Brightness (0-255) - Default: Minimum for visibility
     int16_t hue{0};             // HSV Hue for touchpad mode (0-360)
     uint8_t sat{255};           // HSV Saturation (0-255)
-    int16_t touch_accum_x{0};   // Touchpad delta accumulator X
-    int16_t touch_accum_y{0};   // Touchpad delta accumulator Y
     bool combo_active{false};   // Whether START+R2 combo is held
-    bool battery_mode_active{false}; // Battery display mode (2s)
-    uint32_t battery_mode_end_ms{0}; // When battery mode expires
+    bool battery_mode_active{false}; // Battery display mode (4s fade)
+    uint32_t battery_mode_start_ms{0}; // When battery mode started
     uint8_t saved_r{0};         // Saved color before battery mode
     uint8_t saved_g{0};
     uint8_t saved_b{0};
+    uint8_t target_r{0};        // Target color for smooth transitions
+    uint8_t target_g{0};
+    uint8_t target_b{0};
     uint8_t current_r{0};       // Currently applied R/G/B values
     uint8_t current_g{0};
     uint8_t current_b{0};
@@ -82,17 +83,55 @@ bool any_connected()
     return false;
 }
 
-// Helper: Apply lightbar color only if it changed (avoid redundant calls)
-static void apply_lightbar_color(uni_hid_device_t* device, int idx, uint8_t r, uint8_t g, uint8_t b)
+// Helper: Apply lightbar color with smooth transition
+static void set_target_color(int idx, uint8_t r, uint8_t g, uint8_t b)
 {
     LightbarSettings& lb = lightbar_[idx];
-    if (lb.current_r != r || lb.current_g != g || lb.current_b != b)
-    {
-        device->report_parser.set_lightbar_color(device, r, g, b);
-        lb.current_r = r;
-        lb.current_g = g;
-        lb.current_b = b;
+    lb.target_r = r;
+    lb.target_g = g;
+    lb.target_b = b;
+}
+
+// Helper: Smooth color interpolation (called each frame)
+static void update_color_smooth(uni_hid_device_t* device, int idx)
+{
+    LightbarSettings& lb = lightbar_[idx];
+
+    // Interpolate: move current toward target by 20% each frame (~50ms = smooth)
+    auto lerp = [](uint8_t current, uint8_t target) -> uint8_t {
+        int diff = target - current;
+        if (diff == 0) return current;
+        int step = diff / 5;  // 20% step
+        if (step == 0) step = (diff > 0) ? 1 : -1;  // Min 1 step
+        return current + step;
+    };
+
+    lb.current_r = lerp(lb.current_r, lb.target_r);
+    lb.current_g = lerp(lb.current_g, lb.target_g);
+    lb.current_b = lerp(lb.current_b, lb.target_b);
+
+    // Apply if changed
+    static uint8_t prev_r[MAX_GAMEPADS] = {0};
+    static uint8_t prev_g[MAX_GAMEPADS] = {0};
+    static uint8_t prev_b[MAX_GAMEPADS] = {0};
+
+    if (prev_r[idx] != lb.current_r || prev_g[idx] != lb.current_g || prev_b[idx] != lb.current_b) {
+        device->report_parser.set_lightbar_color(device, lb.current_r, lb.current_g, lb.current_b);
+        prev_r[idx] = lb.current_r;
+        prev_g[idx] = lb.current_g;
+        prev_b[idx] = lb.current_b;
     }
+}
+
+// Helper: Apply lightbar color instantly (for backward compatibility)
+static void apply_lightbar_color(uni_hid_device_t* device, int idx, uint8_t r, uint8_t g, uint8_t b)
+{
+    set_target_color(idx, r, g, b);
+    LightbarSettings& lb = lightbar_[idx];
+    lb.current_r = r;
+    lb.current_g = g;
+    lb.current_b = b;
+    device->report_parser.set_lightbar_color(device, r, g, b);
 }
 
 // Helper: Calculate color from index and brightness
@@ -380,7 +419,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
 
-    // DS4 Lightbar control: START + CROSS = battery display, START + R2 + touchpad = color
+    // DS4 Lightbar control: START + CROSS = battery display, START + R2 = color selection
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         LightbarSettings& lb = lightbar_[idx];
         const uint32_t now_ms = board_api::ms_since_boot();
@@ -395,7 +434,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             static bool prev_battery_combo[MAX_GAMEPADS] = {false};
 
             if (!prev_battery_combo[idx]) {
-                // Combo just triggered - activate battery mode
+                // Combo just triggered - activate 4s battery fade
                 led_double_blink();  // Feedback: double blink Pico LED
 
                 // Save current color
@@ -403,16 +442,8 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 lb.saved_g = lb.current_g;
                 lb.saved_b = lb.current_b;
 
-                // Show battery color at minimum brightness for 2s
-                uint8_t r, g, b;
-                get_battery_color(controller->battery, r, g, b);
-                r = (r * 10) / 255;  // Apply minimum brightness
-                g = (g * 10) / 255;
-                b = (b * 10) / 255;
-                apply_lightbar_color(device, idx, r, g, b);
-
                 lb.battery_mode_active = true;
-                lb.battery_mode_end_ms = now_ms + 2000;  // 2 seconds
+                lb.battery_mode_start_ms = now_ms;
 
                 // Signal PS3Device for 30s real battery reporting
                 gp_in.battery_combo_triggered = true;
@@ -426,85 +457,163 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             prev_battery_combo[idx] = false;
         }
 
-        // Check battery mode timeout
-        if (lb.battery_mode_active && now_ms >= lb.battery_mode_end_ms) {
-            // Restore previous color
-            apply_lightbar_color(device, idx, lb.saved_r, lb.saved_g, lb.saved_b);
-            lb.battery_mode_active = false;
-        }
-
-        // Color selection mode: START + R2 + touchpad OR DPAD
-        if (color_combo && !lb.battery_mode_active) {
-            static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF};
-            bool color_changed = false;
+        // Battery mode: 4s smooth fade (1s fade in, 2s hold, 1s fade out)
+        if (lb.battery_mode_active) {
+            uint32_t elapsed = now_ms - lb.battery_mode_start_ms;
             uint8_t r, g, b;
+            get_battery_color(controller->battery, r, g, b);
 
-            // Touchpad: smooth HSV color selection
-            int32_t delta_x = controller->mouse.delta_x;
-            int32_t delta_y = controller->mouse.delta_y;
-
-            if (delta_x != 0 || delta_y != 0) {
-                // Accumulate deltas, map to HSV space
-                lb.touch_accum_x += delta_x;
-                lb.touch_accum_y += delta_y;
-
-                // X -> Hue (0-360), clamp and wrap
-                lb.hue = (lb.hue + delta_x / 4) % 360;
-                if (lb.hue < 0) lb.hue += 360;
-
-                // Y -> Saturation (0-255), clamp
-                int new_sat = lb.sat - (delta_y / 2);
-                lb.sat = static_cast<uint8_t>(std::min(255, std::max(0, new_sat)));
-
-                hsv_to_rgb(lb.hue, lb.sat, lb.brightness, r, g, b);
-                apply_lightbar_color(device, idx, r, g, b);
-                color_changed = true;
+            if (elapsed < 1000) {
+                // Fade in over 1s
+                uint8_t alpha = (elapsed * 255) / 1000;
+                r = (lb.saved_r * (255 - alpha) + r * alpha) / 255;
+                g = (lb.saved_g * (255 - alpha) + g * alpha) / 255;
+                b = (lb.saved_b * (255 - alpha) + b * alpha) / 255;
+            } else if (elapsed < 3000) {
+                // Hold at battery color for 2s (1s-3s)
+                // r, g, b already set
+            } else if (elapsed < 4000) {
+                // Fade out over 1s (3s-4s)
+                uint8_t alpha = ((elapsed - 3000) * 255) / 1000;
+                r = (r * (255 - alpha) + lb.saved_r * alpha) / 255;
+                g = (g * (255 - alpha) + lb.saved_g * alpha) / 255;
+                b = (b * (255 - alpha) + lb.saved_b * alpha) / 255;
+            } else {
+                // Done - restore saved color
+                r = lb.saved_r;
+                g = lb.saved_g;
+                b = lb.saved_b;
+                lb.battery_mode_active = false;
             }
 
-            // DPAD fallback: cycle presets LEFT/RIGHT, brightness UP/DOWN
-            if (!color_changed) {
-                if (uni_gp->dpad == DPAD_LEFT && prev_dpad[idx] != DPAD_LEFT) {
+            set_target_color(idx, r, g, b);
+        }
+
+        // Color selection mode: START + R2 + (DPAD or Left Joystick)
+        else if (color_combo) {
+            static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF};
+            static int16_t prev_joy_x[MAX_GAMEPADS] = {0};
+            static int16_t prev_joy_y[MAX_GAMEPADS] = {0};
+            bool color_changed = false;
+            bool joy_used = false;
+            uint8_t r, g, b;
+
+            // NOTE: Touchpad code commented out (causes Pico crashes)
+            /*
+            int32_t delta_x = controller->mouse.delta_x;
+            int32_t delta_y = controller->mouse.delta_y;
+            if (delta_x != 0 || delta_y != 0) {
+                lb.hue = (lb.hue + delta_x / 4) % 360;
+                if (lb.hue < 0) lb.hue += 360;
+                int new_sat = lb.sat - (delta_y / 2);
+                lb.sat = static_cast<uint8_t>(std::min(255, std::max(0, new_sat)));
+                hsv_to_rgb(lb.hue, lb.sat, lb.brightness, r, g, b);
+                set_target_color(idx, r, g, b);
+                color_changed = true;
+            }
+            */
+
+            // Left Joystick: same as DPAD (LEFT/RIGHT=color, UP/DOWN=brightness)
+            int16_t joy_x = uni_gp->axis_x - 512;  // Center at 0
+            int16_t joy_y = uni_gp->axis_y - 512;
+
+            if (abs(joy_x) > 300 || abs(joy_y) > 300) {  // Deadzone
+                if (joy_x < -300 && prev_joy_x[idx] >= -300) {
                     lb.color_index = (lb.color_index == 0) ? 11 : lb.color_index - 1;
                     color_changed = true;
-                } else if (uni_gp->dpad == DPAD_RIGHT && prev_dpad[idx] != DPAD_RIGHT) {
+                    joy_used = true;
+                } else if (joy_x > 300 && prev_joy_x[idx] <= 300) {
                     lb.color_index = (lb.color_index + 1) % 12;
                     color_changed = true;
-                } else if (uni_gp->dpad == DPAD_UP && prev_dpad[idx] != DPAD_UP) {
-                    lb.brightness = std::min(255, lb.brightness + 25);
+                    joy_used = true;
+                } else if (joy_y < -300 && prev_joy_y[idx] >= -300) {
+                    lb.brightness = std::min(255, lb.brightness + 30);  // Faster: 25->30
                     color_changed = true;
-                } else if (uni_gp->dpad == DPAD_DOWN && prev_dpad[idx] != DPAD_DOWN) {
-                    lb.brightness = std::max(10, lb.brightness - 25);  // Min brightness 10
+                    joy_used = true;
+                } else if (joy_y > 300 && prev_joy_y[idx] <= 300) {
+                    lb.brightness = std::max(10, lb.brightness - 30);
                     color_changed = true;
+                    joy_used = true;
                 }
+                prev_joy_x[idx] = joy_x;
+                prev_joy_y[idx] = joy_y;
+            } else {
+                prev_joy_x[idx] = 0;
+                prev_joy_y[idx] = 0;
+            }
 
-                if (color_changed) {
-                    calculate_color(idx, r, g, b);
-                    apply_lightbar_color(device, idx, r, g, b);
+            // DPAD: cycle presets (faster: triggers on every frame held, not just press)
+            if (!color_changed) {
+                static uint8_t dpad_repeat_delay[MAX_GAMEPADS] = {0};
+
+                if (uni_gp->dpad == DPAD_LEFT) {
+                    if (prev_dpad[idx] != DPAD_LEFT || dpad_repeat_delay[idx]++ > 3) {  // Faster: 3 frames
+                        lb.color_index = (lb.color_index == 0) ? 11 : lb.color_index - 1;
+                        color_changed = true;
+                        dpad_repeat_delay[idx] = 0;
+                    }
+                } else if (uni_gp->dpad == DPAD_RIGHT) {
+                    if (prev_dpad[idx] != DPAD_RIGHT || dpad_repeat_delay[idx]++ > 3) {
+                        lb.color_index = (lb.color_index + 1) % 12;
+                        color_changed = true;
+                        dpad_repeat_delay[idx] = 0;
+                    }
+                } else if (uni_gp->dpad == DPAD_UP) {
+                    if (prev_dpad[idx] != DPAD_UP || dpad_repeat_delay[idx]++ > 3) {
+                        lb.brightness = std::min(255, lb.brightness + 30);
+                        color_changed = true;
+                        dpad_repeat_delay[idx] = 0;
+                    }
+                } else if (uni_gp->dpad == DPAD_DOWN) {
+                    if (prev_dpad[idx] != DPAD_DOWN || dpad_repeat_delay[idx]++ > 3) {
+                        lb.brightness = std::max(10, lb.brightness - 30);
+                        color_changed = true;
+                        dpad_repeat_delay[idx] = 0;
+                    }
+                } else {
+                    dpad_repeat_delay[idx] = 0;
                 }
+            }
+
+            if (color_changed) {
+                calculate_color(idx, r, g, b);
+                set_target_color(idx, r, g, b);
+            }
+
+            // Rumble feedback when joystick used (low intensity)
+            if (joy_used) {
+                Gamepad::PadOut gp_out;
+                gp_out.rumble_l = 30;  // Low rumble
+                gp_out.rumble_r = 30;
+                gamepad->set_pad_out(gp_out);
             }
 
             // Intercept combo inputs
             gp_in.buttons &= ~gamepad->MAP_BUTTON_START;
             gp_in.trigger_r = 0;
             gp_in.dpad = 0;
+            gp_in.joystick_lx = 0;  // Clear left joystick
+            gp_in.joystick_ly = 0;
 
             prev_dpad[idx] = uni_gp->dpad;
             lb.combo_active = true;
-        } else if (!lb.battery_mode_active) {
+        } else {
             // No combo - show normal color or low battery warning
             uint8_t battery_pct = (controller->battery * 100) / 255;
 
             if (battery_pct < 20 && controller->battery > 0) {
-                apply_lightbar_color(device, idx, 50, 0, 0);  // Dim red for low battery
+                set_target_color(idx, 50, 0, 0);  // Dim red for low battery
             } else if (!lb.combo_active) {
-                // Restore saved color or calculate from current settings
                 uint8_t r, g, b;
                 calculate_color(idx, r, g, b);
-                apply_lightbar_color(device, idx, r, g, b);
+                set_target_color(idx, r, g, b);
             }
 
             lb.combo_active = false;
         }
+
+        // Always update smooth color transitions
+        update_color_smooth(device, idx);
     }
 
     gamepad->set_pad_in(gp_in);
