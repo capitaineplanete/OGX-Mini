@@ -26,14 +26,12 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
     if (gamepad.new_pad_in())
     {
         Gamepad::PadIn gp_in = gamepad.get_pad_in();
-
-        OGXM_USB_LOG("[PS3] IN: Lstick(%d,%d) Rstick(%d,%d) Trig(%d,%d) Btns=0x%04X Dpad=0x%02X\n",
-                     gp_in.joystick_lx, gp_in.joystick_ly,
-                     gp_in.joystick_rx, gp_in.joystick_ry,
-                     gp_in.trigger_l, gp_in.trigger_r,
-                     gp_in.buttons, gp_in.dpad);
-
         report_in_ = PS3::InReport();
+
+        // Only log PS3 output periodically or on significant changes
+        static uint32_t ps3_report_count = 0;
+        ps3_report_count++;
+        bool log_ps3 = (ps3_report_count % 100 == 0) || (gp_in.buttons != 0);
 
         switch (gp_in.dpad)
         {
@@ -145,14 +143,13 @@ void PS3Device::process(const uint8_t idx, Gamepad& gamepad)
             report_in_.l1_axis = (gp_in.buttons & Gamepad::BUTTON_LB) ? 0xFF : 0;
         }
 
-        // Log final PS3 report values
-        OGXM_USB_LOG("[PS3] OUT: Lstick(%d,%d) Rstick(%d,%d) Trig(%d,%d) Btns=0x%02X%02X%02X Dpad=0x%02X Bat=%d%%\n",
-                     report_in_.joystick_lx, report_in_.joystick_ly,
-                     report_in_.joystick_rx, report_in_.joystick_ry,
-                     report_in_.l2_axis, report_in_.r2_axis,
-                     report_in_.buttons[0], report_in_.buttons[1], report_in_.buttons[2],
-                     report_in_.buttons[0] & 0xF0,  // D-pad bits in buttons[0]
-                     report_in_.move_power_status);
+        if (log_ps3) {
+            OGXM_USB_LOG("[PS3→] L(%d,%d) R(%d,%d) T(%d,%d) Bat=%d%%\n",
+                         report_in_.joystick_lx, report_in_.joystick_ly,
+                         report_in_.joystick_rx, report_in_.joystick_ry,
+                         report_in_.l2_axis, report_in_.r2_axis,
+                         report_in_.move_power_status);
+        }
     }
 
     if (tud_suspended())

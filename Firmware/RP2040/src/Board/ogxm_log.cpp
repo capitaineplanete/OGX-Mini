@@ -101,24 +101,23 @@ static inline bool is_webapp_mode() {
 }
 
 void usb_log(const std::string& message) {
-    if (!is_webapp_mode() || !tud_cdc_connected()) {
+    // Completely non-blocking - if buffer full or not connected, just drop the log
+    if (!is_webapp_mode() || !tud_cdc_connected() || !tud_cdc_write_available()) {
         return;
     }
 
     const char* msg = message.c_str();
     size_t len = message.length();
-    size_t written = 0;
 
-    while (written < len) {
-        if (!tud_cdc_connected()) break;
-
-        size_t chunk = tud_cdc_write(msg + written, len - written);
-        written += chunk;
-
-        if (chunk > 0) {
-            tud_cdc_write_flush();
-        }
+    // Try to write in one shot - if it doesn't fit, drop it
+    size_t available = tud_cdc_write_available();
+    if (available == 0) {
+        return;
     }
+
+    size_t to_write = (len < available) ? len : available;
+    tud_cdc_write(msg, to_write);
+    tud_cdc_write_flush();
 }
 
 void usb_log(const char* fmt, ...) {

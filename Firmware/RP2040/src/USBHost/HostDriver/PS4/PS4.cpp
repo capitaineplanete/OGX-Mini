@@ -9,13 +9,18 @@
 
 void PS4Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report_desc, uint16_t desc_len)
 {
-    OGXM_USB_LOG("[DS4] INIT: Controller connected @ addr=%d inst=%d\n", address, instance);
+    OGXM_USB_LOG("\n========================================\n");
+    OGXM_USB_LOG("[DS4] INIT: Controller connected\n");
+    OGXM_USB_LOG("[DS4] INIT: USB addr=%d inst=%d\n", address, instance);
+    OGXM_USB_LOG("[DS4] INIT: Report descriptor size=%d bytes\n", desc_len);
 
     out_report_.report_id = 0x05;
     out_report_.set_led = 1;
     out_report_.lightbar_blue = 0xFF / 2;
 
-    OGXM_USB_LOG("[DS4] INIT: Lightbar set to BLUE, awaiting reports\n");
+    OGXM_USB_LOG("[DS4] INIT: Lightbar set to BLUE\n");
+    OGXM_USB_LOG("[DS4] INIT: Ready to receive reports\n");
+    OGXM_USB_LOG("========================================\n\n");
 
     tuh_hid_receive_report(address, instance);
 }
@@ -35,12 +40,24 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     std::memcpy(&in_report_, report, std::min(static_cast<size_t>(len), sizeof(PS4::InReport)));
     in_report_.buttons[2] &= PS4::COUNTER_MASK;
 
-    // Log raw input (before stabilization) for diagnostics
-    OGXM_USB_LOG("[DS4] RAW: Lstick(%d,%d) Rstick(%d,%d) Dpad=0x%X Btns=0x%02X%02X%02X\n",
-                 in_report_.joystick_lx, in_report_.joystick_ly,
-                 in_report_.joystick_rx, in_report_.joystick_ry,
-                 in_report_.buttons[0] & PS4::DPAD_MASK,
-                 in_report_.buttons[0], in_report_.buttons[1], in_report_.buttons[2]);
+    // Report processing statistics
+    static uint32_t report_count = 0;
+    static uint32_t stabilization_count = 0;
+    static uint32_t corruption_count = 0;
+    static uint32_t duplicate_count = 0;
+    report_count++;
+
+    // Only log every Nth report or when something interesting happens
+    bool log_this_report = (report_count % 50 == 0); // Log every 50th report
+
+    if (log_this_report) {
+        OGXM_USB_LOG("\n[DS4] Report #%lu: L(%d,%d) R(%d,%d) Dpad=0x%X Trig(%d,%d)\n",
+                     report_count,
+                     in_report_.joystick_lx, in_report_.joystick_ly,
+                     in_report_.joystick_rx, in_report_.joystick_ry,
+                     in_report_.buttons[0] & PS4::DPAD_MASK,
+                     in_report_.trigger_l, in_report_.trigger_r);
+    }
 
     // Stabilize joystick inputs to prevent Bluetooth noise from triggering phantom movement
     // Snap values near center (126-130) to exact center (128) before processing
@@ -66,7 +83,10 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     if (orig_lx != in_report_.joystick_lx || orig_ly != in_report_.joystick_ly ||
         orig_rx != in_report_.joystick_rx || orig_ry != in_report_.joystick_ry)
     {
-        OGXM_USB_LOG("[DS4] STAB: L(%d,%d→%d,%d) R(%d,%d→%d,%d) [Noise corrected]\n",
+        stabilization_count++;
+        log_this_report = true; // Always log noise corrections
+        OGXM_USB_LOG("[DS4] NOISE #%lu: L(%d,%d→%d,%d) R(%d,%d→%d,%d)\n",
+                     stabilization_count,
                      orig_lx, orig_ly, in_report_.joystick_lx, in_report_.joystick_ly,
                      orig_rx, orig_ry, in_report_.joystick_rx, in_report_.joystick_ry);
     }
@@ -76,24 +96,44 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     uint8_t dpad_value = in_report_.buttons[0] & PS4::DPAD_MASK;
     if (dpad_value > PS4::Buttons0::DPAD_CENTER)
     {
-        OGXM_USB_LOG("[DS4] DPAD: Invalid HAT=0x%X → forced to CENTER [Corruption detected]\n", dpad_value);
+        corruption_count++;
+        log_this_report = true; // Always log corruption
+        OGXM_USB_LOG("[DS4] CORRUPT #%lu: Dpad HAT=0x%X (invalid!) → forced CENTER\n",
+                     corruption_count, dpad_value);
         in_report_.buttons[0] = (in_report_.buttons[0] & ~PS4::DPAD_MASK) | PS4::Buttons0::DPAD_CENTER;
     }
 
     // Compare masked report (not raw) to prevent counter from causing false changes
     if (std::memcmp(&in_report_, &prev_in_report_, sizeof(PS4::InReport)) == 0)
     {
-        OGXM_USB_LOG("[DS4] DEDUP: Report identical to previous → skipped\n");
+        duplicate_count++;
         tuh_hid_receive_report(address, instance);
         return;
     }
 
-    OGXM_USB_LOG("[DS4] PROC: Processing new report\n");
+    // Report statistics summary (every 100 reports)
+    if (report_count % 100 == 0)
+    {
+        OGXM_USB_LOG("\n=== STATS: Rpt=%lu Noise=%lu Corrupt=%lu Dup=%lu ===\n\n",
+                     report_count, stabilization_count, corruption_count, duplicate_count);
+    }
 
     // Detect phantom L3+R3 simultaneous presses (common corruption pattern)
     if ((in_report_.buttons[1] & PS4::Buttons1::L3) && (in_report_.buttons[1] & PS4::Buttons1::R3))
     {
-        OGXM_USB_LOG("[DS4] WARN: L3+R3 simultaneous press detected! [Possible phantom]\n");
+        log_this_report = true; // Always log phantoms
+        OGXM_USB_LOG("[DS4] PHANTOM: L3+R3 pressed together!\n");
+    }
+
+    // Detect unusual button combinations that might indicate corruption
+    uint8_t button_count = 0;
+    uint16_t all_buttons = (in_report_.buttons[0] >> 4) | (in_report_.buttons[1] << 4) | (in_report_.buttons[2] << 12);
+    for (int i = 0; i < 16; i++) {
+        if (all_buttons & (1 << i)) button_count++;
+    }
+    if (button_count >= 6) {
+        log_this_report = true; // Log unusual button combos
+        OGXM_USB_LOG("[DS4] UNUSUAL: %d buttons pressed!\n", button_count);
     }
 
     Gamepad::PadIn gp_in;   
@@ -141,13 +181,25 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     if (in_report_.buttons[2] & PS4::Buttons2::PS)       gp_in.buttons |= gamepad.MAP_BUTTON_SYS;
     if (in_report_.buttons[2] & PS4::Buttons2::TP)       gp_in.buttons |= gamepad.MAP_BUTTON_MISC;
 
-    OGXM_USB_LOG("[DS4] TRIG: L2=%d R2=%d (raw)\n", in_report_.trigger_l, in_report_.trigger_r);
-
     gp_in.trigger_l = gamepad.scale_trigger_l(in_report_.trigger_l);
     gp_in.trigger_r = gamepad.scale_trigger_r(in_report_.trigger_r);
 
     std::tie(gp_in.joystick_lx, gp_in.joystick_ly) = gamepad.scale_joystick_l(in_report_.joystick_lx, in_report_.joystick_ly);
     std::tie(gp_in.joystick_rx, gp_in.joystick_ry) = gamepad.scale_joystick_r(in_report_.joystick_rx, in_report_.joystick_ry);
+
+    // Log button presses (only if something is pressed)
+    if (gp_in.buttons != 0 && log_this_report) {
+        OGXM_USB_LOG("[DS4] BTN: ");
+        if (gp_in.buttons & gamepad.MAP_BUTTON_X)     OGXM_USB_LOG("□ ");
+        if (gp_in.buttons & gamepad.MAP_BUTTON_A)     OGXM_USB_LOG("X ");
+        if (gp_in.buttons & gamepad.MAP_BUTTON_B)     OGXM_USB_LOG("O ");
+        if (gp_in.buttons & gamepad.MAP_BUTTON_Y)     OGXM_USB_LOG("△ ");
+        if (gp_in.buttons & gamepad.MAP_BUTTON_LB)    OGXM_USB_LOG("L1 ");
+        if (gp_in.buttons & gamepad.MAP_BUTTON_RB)    OGXM_USB_LOG("R1 ");
+        if (gp_in.buttons & gamepad.MAP_BUTTON_L3)    OGXM_USB_LOG("L3 ");
+        if (gp_in.buttons & gamepad.MAP_BUTTON_R3)    OGXM_USB_LOG("R3 ");
+        OGXM_USB_LOG("\n");
+    }
 
     // DS4 doesn't have analog buttons, but simulate them for compatibility
     // This ensures games expecting analog button data work correctly
@@ -157,13 +209,6 @@ void PS4Host::process_report(Gamepad& gamepad, uint8_t address, uint8_t instance
     gp_in.analog[gamepad.MAP_ANALOG_OFF_Y]  = (gp_in.buttons & gamepad.MAP_BUTTON_Y)  ? 0xFF : 0;
     gp_in.analog[gamepad.MAP_ANALOG_OFF_LB] = (gp_in.buttons & gamepad.MAP_BUTTON_LB) ? 0xFF : 0;
     gp_in.analog[gamepad.MAP_ANALOG_OFF_RB] = (gp_in.buttons & gamepad.MAP_BUTTON_RB) ? 0xFF : 0;
-
-    // Log final scaled/processed values before sending to gamepad
-    OGXM_USB_LOG("[DS4] OUT: Lstick(%d,%d) Rstick(%d,%d) Trig(%d,%d) Btns=0x%04X Dpad=0x%02X\n",
-                 gp_in.joystick_lx, gp_in.joystick_ly,
-                 gp_in.joystick_rx, gp_in.joystick_ry,
-                 gp_in.trigger_l, gp_in.trigger_r,
-                 gp_in.buttons, gp_in.dpad);
 
     gamepad.set_pad_in(gp_in);
 
