@@ -453,7 +453,8 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 if (lb.hue < 0) lb.hue += 360;
 
                 // Y -> Saturation (0-255), clamp
-                lb.sat = std::min(255, std::max(0, lb.sat - (delta_y / 2)));
+                int new_sat = lb.sat - (delta_y / 2);
+                lb.sat = static_cast<uint8_t>(std::min(255, std::max(0, new_sat)));
 
                 hsv_to_rgb(lb.hue, lb.sat, lb.brightness, r, g, b);
                 apply_lightbar_color(device, idx, r, g, b);
