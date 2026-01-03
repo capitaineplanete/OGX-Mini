@@ -119,6 +119,10 @@ static void update_color_smooth(uni_hid_device_t* device, int idx)
 {
     LightbarSettings& lb = lightbar_[idx];
 
+    const uint8_t prev_r = lb.current_r;
+    const uint8_t prev_g = lb.current_g;
+    const uint8_t prev_b = lb.current_b;
+
     lb.current_r = lerp_20(lb.current_r, lb.target_r);
     lb.current_g = lerp_20(lb.current_g, lb.target_g);
     lb.current_b = lerp_20(lb.current_b, lb.target_b);
@@ -128,7 +132,10 @@ static void update_color_smooth(uni_hid_device_t* device, int idx)
                                  lb.current_g != lb.target_g ||
                                  lb.current_b != lb.target_b);
 
-    device->report_parser.set_lightbar_color(device, lb.current_r, lb.current_g, lb.current_b);
+    // CRITICAL: Only send USB packet if color actually changed
+    if (prev_r != lb.current_r || prev_g != lb.current_g || prev_b != lb.current_b) {
+        device->report_parser.set_lightbar_color(device, lb.current_r, lb.current_g, lb.current_b);
+    }
 }
 
 // Helper: Apply lightbar color instantly (for backward compatibility)
@@ -159,16 +166,12 @@ static void calculate_color(int idx, uint8_t& r, uint8_t& g, uint8_t& b)
     b = scale_brightness(color[2], lb.brightness);
 }
 
-// Helper: Double blink Pico LED (ends in ON state, matches mode selection pattern)
-static void led_double_blink()
+// Helper: Quick LED feedback (non-blocking - just set state, no sleep)
+static void led_feedback()
 {
-    board_api::set_led(false);
-    sleep_ms(100);
+    // No sleep - blocking kills input responsiveness!
+    // LED state managed by led_timer callback
     board_api::set_led(true);
-    sleep_ms(100);
-    board_api::set_led(false);
-    sleep_ms(100);
-    board_api::set_led(true);  // End in ON state
 }
 
 // Helper: Get battery color (green/orange/red based on level)
@@ -426,7 +429,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
         // Battery display: START + SELECT
         if (battery_combo) {
             if (!lb.prev_battery_combo) {
-                led_double_blink();
+                led_feedback();
                 lb.saved_r = lb.current_r;
                 lb.saved_g = lb.current_g;
                 lb.saved_b = lb.current_b;
