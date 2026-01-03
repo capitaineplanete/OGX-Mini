@@ -23,6 +23,15 @@ namespace bluepad32 {
 static constexpr uint32_t FEEDBACK_TIME_MS = 250;
 static constexpr uint32_t LED_CHECK_TIME_MS = 500;
 
+// Color selection constants
+static constexpr uint8_t R2_THRESHOLD = 200;
+static constexpr uint8_t MIN_BRIGHTNESS = 10;
+static constexpr uint8_t MAX_BRIGHTNESS = 255;
+static constexpr uint8_t BRIGHTNESS_JUMP = 5;
+static constexpr uint8_t DPAD_REPEAT_FRAMES = 3;
+static constexpr uint32_t HOLD_THRESHOLD_MS = 2000;
+static constexpr uint8_t NUM_COLORS = 12;
+
 struct BTDevice {
     bool connected{false};
     Gamepad* gamepad{nullptr};
@@ -34,21 +43,27 @@ btstack_timer_source_t led_timer_;
 bool led_timer_set_{false};
 bool feedback_timer_set_{false};
 
-// DS4 Lightbar control settings
+// DS4 Lightbar control settings (consolidated for cache locality)
 struct LightbarSettings {
-    uint8_t color_index{11};    // Current color - Default: White
-    uint8_t brightness{10};     // Brightness (0-255) - Default: Minimum for visibility
-    bool battery_mode_active{false}; // Battery display mode (4s fade)
-    uint32_t battery_mode_start_ms{0}; // When battery mode started
-    uint8_t saved_r{0};         // Saved color before battery mode
-    uint8_t saved_g{0};
-    uint8_t saved_b{0};
-    uint8_t target_r{0};        // Target color for smooth transitions
-    uint8_t target_g{0};
-    uint8_t target_b{0};
-    uint8_t current_r{0};       // Currently applied R/G/B values
-    uint8_t current_g{0};
-    uint8_t current_b{0};
+    // Color state
+    uint8_t color_index{11};    // Default: White
+    uint8_t brightness{MIN_BRIGHTNESS};
+    uint8_t target_r{0}, target_g{0}, target_b{0};
+    uint8_t current_r{0}, current_g{0}, current_b{0};
+
+    // Battery mode
+    bool battery_mode_active{false};
+    uint32_t battery_mode_start_ms{0};
+    uint8_t saved_r{0}, saved_g{0}, saved_b{0};
+
+    // Input state (consolidated - was scattered static arrays)
+    bool prev_battery_combo{false};
+    uint8_t prev_dpad{0};
+    uint32_t dpad_hold_start{0};
+    uint8_t dpad_repeat_counter{0};
+
+    // Optimization: track if transition is active
+    bool has_active_transition{false};
 };
 LightbarSettings lightbar_[MAX_GAMEPADS];
 
@@ -80,6 +95,15 @@ bool any_connected()
     return false;
 }
 
+// Helper: 20% linear interpolation (optimized - no lambda overhead)
+static inline uint8_t lerp_20(uint8_t current, uint8_t target) {
+    int diff = target - current;
+    if (diff == 0) return current;
+    int step = diff / 5;  // 20% step
+    if (step == 0) step = (diff > 0) ? 1 : -1;
+    return current + step;
+}
+
 // Helper: Apply lightbar color with smooth transition
 static void set_target_color(int idx, uint8_t r, uint8_t g, uint8_t b)
 {
@@ -87,37 +111,24 @@ static void set_target_color(int idx, uint8_t r, uint8_t g, uint8_t b)
     lb.target_r = r;
     lb.target_g = g;
     lb.target_b = b;
+    lb.has_active_transition = (r != lb.current_r || g != lb.current_g || b != lb.current_b);
 }
 
-// Helper: Smooth color interpolation (called each frame)
+// Helper: Smooth color interpolation (ONLY called when transition is active)
 static void update_color_smooth(uni_hid_device_t* device, int idx)
 {
     LightbarSettings& lb = lightbar_[idx];
 
-    // Interpolate: move current toward target by 20% each frame (~50ms = smooth)
-    auto lerp = [](uint8_t current, uint8_t target) -> uint8_t {
-        int diff = target - current;
-        if (diff == 0) return current;
-        int step = diff / 5;  // 20% step
-        if (step == 0) step = (diff > 0) ? 1 : -1;  // Min 1 step
-        return current + step;
-    };
+    lb.current_r = lerp_20(lb.current_r, lb.target_r);
+    lb.current_g = lerp_20(lb.current_g, lb.target_g);
+    lb.current_b = lerp_20(lb.current_b, lb.target_b);
 
-    lb.current_r = lerp(lb.current_r, lb.target_r);
-    lb.current_g = lerp(lb.current_g, lb.target_g);
-    lb.current_b = lerp(lb.current_b, lb.target_b);
+    // Check if transition complete
+    lb.has_active_transition = (lb.current_r != lb.target_r ||
+                                 lb.current_g != lb.target_g ||
+                                 lb.current_b != lb.target_b);
 
-    // Apply if changed
-    static uint8_t prev_r[MAX_GAMEPADS] = {0};
-    static uint8_t prev_g[MAX_GAMEPADS] = {0};
-    static uint8_t prev_b[MAX_GAMEPADS] = {0};
-
-    if (prev_r[idx] != lb.current_r || prev_g[idx] != lb.current_g || prev_b[idx] != lb.current_b) {
-        device->report_parser.set_lightbar_color(device, lb.current_r, lb.current_g, lb.current_b);
-        prev_r[idx] = lb.current_r;
-        prev_g[idx] = lb.current_g;
-        prev_b[idx] = lb.current_b;
-    }
+    device->report_parser.set_lightbar_color(device, lb.current_r, lb.current_g, lb.current_b);
 }
 
 // Helper: Apply lightbar color instantly (for backward compatibility)
@@ -131,13 +142,21 @@ static void apply_lightbar_color(uni_hid_device_t* device, int idx, uint8_t r, u
     device->report_parser.set_lightbar_color(device, r, g, b);
 }
 
+// Helper: Fast 8-bit multiply with scaling (avoids slow division)
+// (x * y) / 255 ≈ (x * y + 128) >> 8  (ARM-optimized)
+static inline uint8_t scale_brightness(uint8_t color, uint8_t brightness) {
+    uint16_t result = color * brightness + 128;
+    return result >> 8;
+}
+
 // Helper: Calculate color from index and brightness
 static void calculate_color(int idx, uint8_t& r, uint8_t& g, uint8_t& b)
 {
     LightbarSettings& lb = lightbar_[idx];
-    r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
-    g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
-    b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
+    const uint8_t* color = LIGHTBAR_COLORS[lb.color_index];
+    r = scale_brightness(color[0], lb.brightness);
+    g = scale_brightness(color[1], lb.brightness);
+    b = scale_brightness(color[2], lb.brightness);
 }
 
 // Helper: Double blink Pico LED (ends in ON state, matches mode selection pattern)
@@ -266,9 +285,8 @@ static void device_connected_cb(uni_hid_device_t* device) {
     // Apply default lightbar color for DS4 on connect (white at lowest brightness)
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         LightbarSettings& lb = lightbar_[idx];
-        // Explicitly set defaults to ensure correct initialization
         lb.color_index = 11;    // White
-        lb.brightness = 10;     // Lowest brightness
+        lb.brightness = MIN_BRIGHTNESS;
 
         uint8_t r, g, b;
         calculate_color(idx, r, g, b);
@@ -401,132 +419,95 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
         LightbarSettings& lb = lightbar_[idx];
         const uint32_t now_ms = board_api::ms_since_boot();
 
-        // Detect START + SELECT combo (battery display mode)
+        // Detect combos
         const bool battery_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->misc_buttons & MISC_BUTTON_BACK);
-        static bool prev_battery_combo[MAX_GAMEPADS] = {false};
+        const bool color_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > R2_THRESHOLD);
 
-        // Detect START + R2 combo (color selection mode)
-        const bool color_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > 200);
-
+        // Battery display: START + SELECT
         if (battery_combo) {
-            if (!prev_battery_combo[idx]) {
-                // Combo just triggered - activate 4s battery fade
-                led_double_blink();  // Feedback: double blink Pico LED
-
-                // Save current color
+            if (!lb.prev_battery_combo) {
+                led_double_blink();
                 lb.saved_r = lb.current_r;
                 lb.saved_g = lb.current_g;
                 lb.saved_b = lb.current_b;
-
                 lb.battery_mode_active = true;
                 lb.battery_mode_start_ms = now_ms;
-
-                // Signal PS3Device for 30s real battery reporting
                 gp_in.battery_combo_triggered = true;
             }
-
-            // NOTE: Do NOT intercept combo - let it pass through to PS3
-            prev_battery_combo[idx] = true;
+            lb.prev_battery_combo = true;
         } else {
-            prev_battery_combo[idx] = false;
+            lb.prev_battery_combo = false;
         }
 
-        // Battery mode: 4s smooth fade (1s fade in, 2s hold, 1s fade out) - LOWEST BRIGHTNESS
+        // Battery mode: 4s fade (1s in, 2s hold, 1s out) at MIN_BRIGHTNESS
         if (lb.battery_mode_active) {
             uint32_t elapsed = now_ms - lb.battery_mode_start_ms;
             uint8_t r, g, b;
             get_battery_color(controller->battery, r, g, b);
 
-            // Scale to lowest brightness (10/255)
-            r = (r * 10) / 255;
-            g = (g * 10) / 255;
-            b = (b * 10) / 255;
+            // Scale to MIN_BRIGHTNESS once (not every frame!)
+            r = scale_brightness(r, MIN_BRIGHTNESS);
+            g = scale_brightness(g, MIN_BRIGHTNESS);
+            b = scale_brightness(b, MIN_BRIGHTNESS);
 
             if (elapsed < 1000) {
-                // Fade in over 1s
+                // Fade in
                 uint8_t alpha = (elapsed * 255) / 1000;
-                r = (lb.saved_r * (255 - alpha) + r * alpha) / 255;
-                g = (lb.saved_g * (255 - alpha) + g * alpha) / 255;
-                b = (lb.saved_b * (255 - alpha) + b * alpha) / 255;
-            } else if (elapsed < 3000) {
-                // Hold at battery color for 2s (1s-3s)
-                // r, g, b already set
-            } else if (elapsed < 4000) {
-                // Fade out over 1s (3s-4s)
-                uint8_t alpha = ((elapsed - 3000) * 255) / 1000;
-                r = (r * (255 - alpha) + lb.saved_r * alpha) / 255;
-                g = (g * (255 - alpha) + lb.saved_g * alpha) / 255;
-                b = (b * (255 - alpha) + lb.saved_b * alpha) / 255;
-            } else {
-                // Done - restore saved color
-                r = lb.saved_r;
-                g = lb.saved_g;
-                b = lb.saved_b;
-                lb.battery_mode_active = false;
+                r = (lb.saved_r * (255 - alpha) + r * alpha) >> 8;
+                g = (lb.saved_g * (255 - alpha) + g * alpha) >> 8;
+                b = (lb.saved_b * (255 - alpha) + b * alpha) >> 8;
+            } else if (elapsed >= 3000) {
+                if (elapsed < 4000) {
+                    // Fade out
+                    uint8_t alpha = ((elapsed - 3000) * 255) / 1000;
+                    r = (r * (255 - alpha) + lb.saved_r * alpha) >> 8;
+                    g = (g * (255 - alpha) + lb.saved_g * alpha) >> 8;
+                    b = (b * (255 - alpha) + lb.saved_b * alpha) >> 8;
+                } else {
+                    // Done
+                    r = lb.saved_r;
+                    g = lb.saved_g;
+                    b = lb.saved_b;
+                    lb.battery_mode_active = false;
+                }
             }
-
             set_target_color(idx, r, g, b);
         }
 
-        // Color selection mode: START + R2 + DPAD arrows
+        // Color selection: START + R2 + DPAD
         if (color_combo && !lb.battery_mode_active) {
-            static uint8_t prev_dpad[MAX_GAMEPADS] = {0};
-            static uint32_t dpad_hold_start[MAX_GAMEPADS] = {0};
-            static uint8_t dpad_repeat_counter[MAX_GAMEPADS] = {0};
             bool color_changed = false;
+            const uint8_t dpad = uni_gp->dpad;
 
-            // UP/DOWN: Brightness adjustment (always fade)
-            if (uni_gp->dpad == DPAD_UP) {
-                if (prev_dpad[idx] != DPAD_UP) {
-                    dpad_hold_start[idx] = now_ms;
-                    dpad_repeat_counter[idx] = 0;
+            // UP/DOWN: Brightness (DRY - no duplication)
+            if (dpad == DPAD_UP || dpad == DPAD_DOWN) {
+                if (lb.prev_dpad != dpad) {
+                    lb.dpad_hold_start = now_ms;
+                    lb.dpad_repeat_counter = 0;
                 }
 
-                // Repeat every 3 frames for smooth fade
-                if (dpad_repeat_counter[idx]++ >= 3) {
-                    if ((now_ms - dpad_hold_start[idx]) > 2000) {
-                        // Held 2s: very smooth fade
-                        lb.brightness = std::min(255, lb.brightness + 1);
-                    } else {
-                        // Quick presses: bigger jumps but still smooth
-                        lb.brightness = std::min(255, lb.brightness + 5);
-                    }
+                if (lb.dpad_repeat_counter++ >= DPAD_REPEAT_FRAMES) {
+                    const bool held = (now_ms - lb.dpad_hold_start) > HOLD_THRESHOLD_MS;
+                    const int8_t step = (dpad == DPAD_UP) ? (held ? 1 : BRIGHTNESS_JUMP) : (held ? -1 : -BRIGHTNESS_JUMP);
+                    const int new_brightness = lb.brightness + step;
+                    lb.brightness = std::clamp(new_brightness, (int)MIN_BRIGHTNESS, (int)MAX_BRIGHTNESS);
                     color_changed = true;
-                    dpad_repeat_counter[idx] = 0;
-                }
-            } else if (uni_gp->dpad == DPAD_DOWN) {
-                if (prev_dpad[idx] != DPAD_DOWN) {
-                    dpad_hold_start[idx] = now_ms;
-                    dpad_repeat_counter[idx] = 0;
-                }
-
-                // Repeat every 3 frames for smooth fade
-                if (dpad_repeat_counter[idx]++ >= 3) {
-                    if ((now_ms - dpad_hold_start[idx]) > 2000) {
-                        // Held 2s: very smooth fade
-                        lb.brightness = std::max(10, lb.brightness - 1);
-                    } else {
-                        // Quick presses: bigger jumps but still smooth
-                        lb.brightness = std::max(10, lb.brightness - 5);
-                    }
-                    color_changed = true;
-                    dpad_repeat_counter[idx] = 0;
+                    lb.dpad_repeat_counter = 0;
                 }
             }
-            // LEFT/RIGHT: Color selection (cycle through presets)
-            else if (uni_gp->dpad == DPAD_LEFT) {
-                if (prev_dpad[idx] != DPAD_LEFT) {
-                    lb.color_index = (lb.color_index == 0) ? 11 : lb.color_index - 1;
+            // LEFT/RIGHT: Color cycle (avoid modulo)
+            else if (dpad == DPAD_LEFT) {
+                if (lb.prev_dpad != DPAD_LEFT) {
+                    lb.color_index = (lb.color_index == 0) ? (NUM_COLORS - 1) : (lb.color_index - 1);
                     color_changed = true;
                 }
-            } else if (uni_gp->dpad == DPAD_RIGHT) {
-                if (prev_dpad[idx] != DPAD_RIGHT) {
-                    lb.color_index = (lb.color_index + 1) % 12;
+            } else if (dpad == DPAD_RIGHT) {
+                if (lb.prev_dpad != DPAD_RIGHT) {
+                    lb.color_index = (lb.color_index + 1 == NUM_COLORS) ? 0 : (lb.color_index + 1);
                     color_changed = true;
                 }
             } else {
-                // No DPAD pressed - reset counter
-                dpad_repeat_counter[idx] = 0;
+                lb.dpad_repeat_counter = 0;
             }
 
             if (color_changed) {
@@ -535,16 +516,18 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 set_target_color(idx, r, g, b);
             }
 
-            prev_dpad[idx] = uni_gp->dpad;
+            lb.prev_dpad = dpad;
 
-            // Intercept combo inputs - don't send to host
+            // Intercept combo
             gp_in.buttons &= ~gamepad->MAP_BUTTON_START;
             gp_in.trigger_r = 0;
             gp_in.dpad = 0;
         }
 
-        // Always update smooth color transitions
-        update_color_smooth(device, idx);
+        // Update smooth transitions ONLY when active
+        if (lb.has_active_transition) {
+            update_color_smooth(device, idx);
+        }
     }
 
     gamepad->set_pad_in(gp_in);
