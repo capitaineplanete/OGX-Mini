@@ -263,8 +263,13 @@ static void device_connected_cb(uni_hid_device_t* device) {
         return;
     }
 
-    // Apply default lightbar color for DS4 on connect (white @ half brightness)
+    // Apply default lightbar color for DS4 on connect (white at lowest brightness)
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
+        LightbarSettings& lb = lightbar_[idx];
+        // Explicitly set defaults to ensure correct initialization
+        lb.color_index = 11;    // White
+        lb.brightness = 10;     // Lowest brightness
+
         uint8_t r, g, b;
         calculate_color(idx, r, g, b);
         apply_lightbar_color(device, idx, r, g, b);
@@ -467,16 +472,13 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
         if (color_combo && !lb.battery_mode_active) {
             static uint8_t prev_dpad[MAX_GAMEPADS] = {0};
             static uint32_t dpad_hold_start[MAX_GAMEPADS] = {0};
-            static bool dpad_held[MAX_GAMEPADS] = {false};
             static uint8_t dpad_repeat_counter[MAX_GAMEPADS] = {0};
             bool color_changed = false;
 
             // UP/DOWN: Brightness adjustment (always fade)
             if (uni_gp->dpad == DPAD_UP) {
                 if (prev_dpad[idx] != DPAD_UP) {
-                    // First press: big jump (faded smoothly)
                     dpad_hold_start[idx] = now_ms;
-                    dpad_held[idx] = false;
                     dpad_repeat_counter[idx] = 0;
                 }
 
@@ -494,9 +496,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 }
             } else if (uni_gp->dpad == DPAD_DOWN) {
                 if (prev_dpad[idx] != DPAD_DOWN) {
-                    // First press: big jump (faded smoothly)
                     dpad_hold_start[idx] = now_ms;
-                    dpad_held[idx] = false;
                     dpad_repeat_counter[idx] = 0;
                 }
 
@@ -513,22 +513,19 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                     dpad_repeat_counter[idx] = 0;
                 }
             }
-            // LEFT/RIGHT: Color selection (cycle through presets with fade)
+            // LEFT/RIGHT: Color selection (cycle through presets)
             else if (uni_gp->dpad == DPAD_LEFT) {
                 if (prev_dpad[idx] != DPAD_LEFT) {
-                    // Cycle to previous color
                     lb.color_index = (lb.color_index == 0) ? 11 : lb.color_index - 1;
                     color_changed = true;
                 }
             } else if (uni_gp->dpad == DPAD_RIGHT) {
                 if (prev_dpad[idx] != DPAD_RIGHT) {
-                    // Cycle to next color
                     lb.color_index = (lb.color_index + 1) % 12;
                     color_changed = true;
                 }
             } else {
-                // No DPAD pressed - reset counters
-                dpad_held[idx] = false;
+                // No DPAD pressed - reset counter
                 dpad_repeat_counter[idx] = 0;
             }
 
