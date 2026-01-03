@@ -38,9 +38,6 @@ bool feedback_timer_set_{false};
 struct LightbarSettings {
     uint8_t color_index{11};    // Current color - Default: White
     uint8_t brightness{10};     // Brightness (0-255) - Default: Minimum for visibility
-    int16_t hue{0};             // HSV Hue for touchpad mode (0-360)
-    uint8_t sat{255};           // HSV Saturation (0-255)
-    bool combo_active{false};   // Whether START+R2 combo is held
     bool battery_mode_active{false}; // Battery display mode (4s fade)
     uint32_t battery_mode_start_ms{0}; // When battery mode started
     uint8_t saved_r{0};         // Saved color before battery mode
@@ -141,31 +138,6 @@ static void calculate_color(int idx, uint8_t& r, uint8_t& g, uint8_t& b)
     r = (LIGHTBAR_COLORS[lb.color_index][0] * lb.brightness) / 255;
     g = (LIGHTBAR_COLORS[lb.color_index][1] * lb.brightness) / 255;
     b = (LIGHTBAR_COLORS[lb.color_index][2] * lb.brightness) / 255;
-}
-
-// Helper: HSV to RGB conversion (optimized integer math)
-static void hsv_to_rgb(int16_t h, uint8_t s, uint8_t v, uint8_t& r, uint8_t& g, uint8_t& b)
-{
-    if (s == 0) { r = g = b = v; return; }
-
-    h = h % 360;
-    if (h < 0) h += 360;
-
-    uint8_t region = h / 60;
-    uint8_t remainder = (h - (region * 60)) * 255 / 60;
-
-    uint8_t p = (v * (255 - s)) / 255;
-    uint8_t q = (v * (255 - ((s * remainder) / 255))) / 255;
-    uint8_t t = (v * (255 - ((s * (255 - remainder)) / 255))) / 255;
-
-    switch (region) {
-        case 0: r = v; g = t; b = p; break;
-        case 1: r = q; g = v; b = p; break;
-        case 2: r = p; g = v; b = t; break;
-        case 3: r = p; g = q; b = v; break;
-        case 4: r = t; g = p; b = v; break;
-        default: r = v; g = p; b = q; break;
-    }
 }
 
 // Helper: Double blink Pico LED (ends in ON state, matches mode selection pattern)
@@ -419,20 +391,16 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
 
-    // DS4 Lightbar control: START + SELECT = battery display, START + R2 = color selection
+    // DS4 Lightbar control: START + SELECT = battery display, DPAD arrows = color/brightness
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         LightbarSettings& lb = lightbar_[idx];
         const uint32_t now_ms = board_api::ms_since_boot();
 
         // Detect START + SELECT combo (battery display mode)
         const bool battery_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->misc_buttons & MISC_BUTTON_BACK);
-
-        // Detect START + R2 combo (color selection mode)
-        const bool color_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > 200);
+        static bool prev_battery_combo[MAX_GAMEPADS] = {false};
 
         if (battery_combo) {
-            static bool prev_battery_combo[MAX_GAMEPADS] = {false};
-
             if (!prev_battery_combo[idx]) {
                 // Combo just triggered - activate 4s battery fade
                 led_double_blink();  // Feedback: double blink Pico LED
@@ -449,11 +417,9 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                 gp_in.battery_combo_triggered = true;
             }
 
-            // Intercept combo - don't send to host
-            gp_in.buttons &= ~(gamepad->MAP_BUTTON_START | gamepad->MAP_BUTTON_BACK);
+            // NOTE: Do NOT intercept combo - let it pass through to PS3
             prev_battery_combo[idx] = true;
         } else {
-            static bool prev_battery_combo[MAX_GAMEPADS] = {false};
             prev_battery_combo[idx] = false;
         }
 
@@ -489,190 +455,74 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             set_target_color(idx, r, g, b);
         }
 
-        // Color selection mode: START + R2 + (DPAD or Left Joystick)
-        else if (color_combo) {
-            static uint8_t prev_dpad[MAX_GAMEPADS] = {0xFF};
+        // DPAD color/brightness control (simple, always active when not in battery mode)
+        if (!lb.battery_mode_active && !battery_combo) {
+            static uint8_t prev_dpad[MAX_GAMEPADS] = {0};
+            static uint32_t dpad_hold_start[MAX_GAMEPADS] = {0};
+            static bool dpad_held[MAX_GAMEPADS] = {false};
+            bool color_changed = false;
 
-	    static bool prev_joy_left[MAX_GAMEPADS] = {false};
-
-	    static bool prev_joy_right[MAX_GAMEPADS] = {false};
-
-	    static bool prev_joy_up[MAX_GAMEPADS] = {false};
-
-	    static bool prev_joy_down[MAX_GAMEPADS] = {false};
-
-	    bool color_changed = false;
-
-	    uint8_t r, g, b;
-
-
-
-	    // Left Joystick: Smooth HSV color wheel (LEFT/RIGHT=hue, UP/DOWN=brightness)
-
-	    int16_t joy_x = uni_gp->axis_x - 512;  // Center at 0
-
-	    int16_t joy_y = uni_gp->axis_y - 512;
-
-
-
-	    const int DEADZONE = 400;  // Larger deadzone to avoid drift
-
-	    // Initialize previous states when combo first activates (prevents instant color change)
-	    if (!lb.combo_active) {
-		prev_joy_left[idx] = (joy_x < -DEADZONE);
-		prev_joy_right[idx] = (joy_x > DEADZONE);
-		prev_joy_up[idx] = (joy_y < -DEADZONE);
-		prev_joy_down[idx] = (joy_y > DEADZONE);
-		prev_dpad[idx] = uni_gp->dpad;
-	    }
-
-	    // X-axis: LEFT/RIGHT on joystick (only trigger on crossing threshold)
-
-	    bool joy_left_now = (joy_x < -DEADZONE);
-
-	    bool joy_right_now = (joy_x > DEADZONE);
-
-	    if (joy_left_now && !prev_joy_left[idx]) {
-
-		lb.hue = (lb.hue - 5 + 360) % 360;
-
-		color_changed = true;
-
-	    } else if (joy_right_now && !prev_joy_right[idx]) {
-
-		lb.hue = (lb.hue + 5) % 360;
-
-		color_changed = true;
-
-	    }
-
-	    prev_joy_left[idx] = joy_left_now;
-
-	    prev_joy_right[idx] = joy_right_now;
-
-
-
-	    // Y-axis: UP/DOWN on joystick (only trigger on crossing threshold)
-
-	    bool joy_up_now = (joy_y < -DEADZONE);
-
-	    bool joy_down_now = (joy_y > DEADZONE);
-
-	    if (joy_up_now && !prev_joy_up[idx]) {
-
-		lb.brightness = std::min(255, lb.brightness + 15);
-
-		color_changed = true;
-
-	    } else if (joy_down_now && !prev_joy_down[idx]) {
-
-		lb.brightness = std::max(10, lb.brightness - 15);
-
-		color_changed = true;
-
-	    }
-
-	    prev_joy_up[idx] = joy_up_now;
-
-	    prev_joy_down[idx] = joy_down_now;
-
-
-
-	    // DPAD: Smooth HSV color wheel (with repeat delay for better control)
-
-	    static uint8_t dpad_repeat_delay[MAX_GAMEPADS] = {0};
-
-
-
-	    if (uni_gp->dpad == DPAD_LEFT) {
-
-		if (prev_dpad[idx] != DPAD_LEFT || dpad_repeat_delay[idx]++ > 15) {
-
-		    lb.hue = (lb.hue - 5 + 360) % 360;
-
-		    color_changed = true;
-
-                    dpad_repeat_delay[idx] = 0;
-
-                }
-
-            } else if (uni_gp->dpad == DPAD_RIGHT) {
-
-                if (prev_dpad[idx] != DPAD_RIGHT || dpad_repeat_delay[idx]++ > 15) {
-
-                    lb.hue = (lb.hue + 5) % 360;
-
+            // UP/DOWN: Brightness adjustment
+            if (uni_gp->dpad == DPAD_UP) {
+                if (prev_dpad[idx] != DPAD_UP) {
+                    // First press: big jump
+                    lb.brightness = std::min(255, lb.brightness + 25);
                     color_changed = true;
-
-                    dpad_repeat_delay[idx] = 0;
-
+                    dpad_hold_start[idx] = now_ms;
+                    dpad_held[idx] = false;
+                } else if (!dpad_held[idx] && (now_ms - dpad_hold_start[idx]) > 2000) {
+                    // Held 2s: start smooth fade
+                    dpad_held[idx] = true;
                 }
 
-            } else if (uni_gp->dpad == DPAD_UP) {
-
-                if (prev_dpad[idx] != DPAD_UP || dpad_repeat_delay[idx]++ > 15) {
-
-                    lb.brightness = std::min(255, lb.brightness + 15);
-
+                if (dpad_held[idx]) {
+                    // Smooth fade while held
+                    lb.brightness = std::min(255, lb.brightness + 1);
                     color_changed = true;
-
-                    dpad_repeat_delay[idx] = 0;
-
                 }
-
             } else if (uni_gp->dpad == DPAD_DOWN) {
-
-                if (prev_dpad[idx] != DPAD_DOWN || dpad_repeat_delay[idx]++ > 15) {
-
-                    lb.brightness = std::max(10, lb.brightness - 15);
-
+                if (prev_dpad[idx] != DPAD_DOWN) {
+                    // First press: big jump
+                    lb.brightness = std::max(10, lb.brightness - 25);
                     color_changed = true;
-
-                    dpad_repeat_delay[idx] = 0;
-
+                    dpad_hold_start[idx] = now_ms;
+                    dpad_held[idx] = false;
+                } else if (!dpad_held[idx] && (now_ms - dpad_hold_start[idx]) > 2000) {
+                    // Held 2s: start smooth fade
+                    dpad_held[idx] = true;
                 }
 
-            } else {
-
-                dpad_repeat_delay[idx] = 0;
-
+                if (dpad_held[idx]) {
+                    // Smooth fade while held
+                    lb.brightness = std::max(10, lb.brightness - 1);
+                    color_changed = true;
+                }
             }
-
-
-
-            // Only update color if something actually changed
+            // LEFT/RIGHT: Color selection (cycle through presets)
+            else if (uni_gp->dpad == DPAD_LEFT) {
+                if (prev_dpad[idx] != DPAD_LEFT) {
+                    // Cycle to previous color
+                    lb.color_index = (lb.color_index == 0) ? 11 : lb.color_index - 1;
+                    color_changed = true;
+                }
+            } else if (uni_gp->dpad == DPAD_RIGHT) {
+                if (prev_dpad[idx] != DPAD_RIGHT) {
+                    // Cycle to next color
+                    lb.color_index = (lb.color_index + 1) % 12;
+                    color_changed = true;
+                }
+            } else {
+                // No DPAD pressed - reset hold state
+                dpad_held[idx] = false;
+            }
 
             if (color_changed) {
-
-                hsv_to_rgb(lb.hue, lb.sat, lb.brightness, r, g, b);
-
+                uint8_t r, g, b;
+                calculate_color(idx, r, g, b);
                 set_target_color(idx, r, g, b);
-
             }
-
-            // Intercept combo inputs
-            gp_in.buttons &= ~gamepad->MAP_BUTTON_START;
-            gp_in.trigger_r = 0;
-            gp_in.dpad = 0;
-            gp_in.joystick_lx = 0;  // Clear left joystick
-            gp_in.joystick_ly = 0;
 
             prev_dpad[idx] = uni_gp->dpad;
-            lb.combo_active = true;
-        } else {
-            // No combo - show normal color or low battery warning
-            uint8_t battery_pct = (controller->battery * 100) / 255;
-
-            if (battery_pct < 20 && controller->battery > 0) {
-                set_target_color(idx, 50, 0, 0);  // Dim red for low battery
-            } else if (!lb.combo_active) {
-                // Use HSV values that were set during combo mode, not preset array
-                uint8_t r, g, b;
-                hsv_to_rgb(lb.hue, lb.sat, lb.brightness, r, g, b);
-                set_target_color(idx, r, g, b);
-            }
-
-            lb.combo_active = false;
         }
 
         // Always update smooth color transitions
