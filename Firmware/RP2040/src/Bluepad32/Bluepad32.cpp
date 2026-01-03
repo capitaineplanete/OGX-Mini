@@ -391,7 +391,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
     // Extract battery level (0-255, 255 = full)
     gp_in.battery = controller->battery;
 
-    // DS4 Lightbar control: START + SELECT = battery display, DPAD arrows = color/brightness
+    // DS4 Lightbar control: START + SELECT = battery display, START + R2 = color selection
     if (device->controller_type == CONTROLLER_TYPE_PS4Controller && device->report_parser.set_lightbar_color != NULL) {
         LightbarSettings& lb = lightbar_[idx];
         const uint32_t now_ms = board_api::ms_since_boot();
@@ -399,6 +399,9 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
         // Detect START + SELECT combo (battery display mode)
         const bool battery_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->misc_buttons & MISC_BUTTON_BACK);
         static bool prev_battery_combo[MAX_GAMEPADS] = {false};
+
+        // Detect START + R2 combo (color selection mode)
+        const bool color_combo = (uni_gp->misc_buttons & MISC_BUTTON_START) && (uni_gp->throttle > 200);
 
         if (battery_combo) {
             if (!prev_battery_combo[idx]) {
@@ -423,11 +426,16 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             prev_battery_combo[idx] = false;
         }
 
-        // Battery mode: 4s smooth fade (1s fade in, 2s hold, 1s fade out)
+        // Battery mode: 4s smooth fade (1s fade in, 2s hold, 1s fade out) - LOWEST BRIGHTNESS
         if (lb.battery_mode_active) {
             uint32_t elapsed = now_ms - lb.battery_mode_start_ms;
             uint8_t r, g, b;
             get_battery_color(controller->battery, r, g, b);
+
+            // Scale to lowest brightness (10/255)
+            r = (r * 10) / 255;
+            g = (g * 10) / 255;
+            b = (b * 10) / 255;
 
             if (elapsed < 1000) {
                 // Fade in over 1s
@@ -455,50 +463,57 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             set_target_color(idx, r, g, b);
         }
 
-        // DPAD color/brightness control (simple, always active when not in battery mode)
-        if (!lb.battery_mode_active && !battery_combo) {
+        // Color selection mode: START + R2 + DPAD arrows
+        if (color_combo && !lb.battery_mode_active) {
             static uint8_t prev_dpad[MAX_GAMEPADS] = {0};
             static uint32_t dpad_hold_start[MAX_GAMEPADS] = {0};
             static bool dpad_held[MAX_GAMEPADS] = {false};
+            static uint8_t dpad_repeat_counter[MAX_GAMEPADS] = {0};
             bool color_changed = false;
 
-            // UP/DOWN: Brightness adjustment
+            // UP/DOWN: Brightness adjustment (always fade)
             if (uni_gp->dpad == DPAD_UP) {
                 if (prev_dpad[idx] != DPAD_UP) {
-                    // First press: big jump
-                    lb.brightness = std::min(255, lb.brightness + 25);
-                    color_changed = true;
+                    // First press: big jump (faded smoothly)
                     dpad_hold_start[idx] = now_ms;
                     dpad_held[idx] = false;
-                } else if (!dpad_held[idx] && (now_ms - dpad_hold_start[idx]) > 2000) {
-                    // Held 2s: start smooth fade
-                    dpad_held[idx] = true;
+                    dpad_repeat_counter[idx] = 0;
                 }
 
-                if (dpad_held[idx]) {
-                    // Smooth fade while held
-                    lb.brightness = std::min(255, lb.brightness + 1);
+                // Repeat every 3 frames for smooth fade
+                if (dpad_repeat_counter[idx]++ >= 3) {
+                    if ((now_ms - dpad_hold_start[idx]) > 2000) {
+                        // Held 2s: very smooth fade
+                        lb.brightness = std::min(255, lb.brightness + 1);
+                    } else {
+                        // Quick presses: bigger jumps but still smooth
+                        lb.brightness = std::min(255, lb.brightness + 5);
+                    }
                     color_changed = true;
+                    dpad_repeat_counter[idx] = 0;
                 }
             } else if (uni_gp->dpad == DPAD_DOWN) {
                 if (prev_dpad[idx] != DPAD_DOWN) {
-                    // First press: big jump
-                    lb.brightness = std::max(10, lb.brightness - 25);
-                    color_changed = true;
+                    // First press: big jump (faded smoothly)
                     dpad_hold_start[idx] = now_ms;
                     dpad_held[idx] = false;
-                } else if (!dpad_held[idx] && (now_ms - dpad_hold_start[idx]) > 2000) {
-                    // Held 2s: start smooth fade
-                    dpad_held[idx] = true;
+                    dpad_repeat_counter[idx] = 0;
                 }
 
-                if (dpad_held[idx]) {
-                    // Smooth fade while held
-                    lb.brightness = std::max(10, lb.brightness - 1);
+                // Repeat every 3 frames for smooth fade
+                if (dpad_repeat_counter[idx]++ >= 3) {
+                    if ((now_ms - dpad_hold_start[idx]) > 2000) {
+                        // Held 2s: very smooth fade
+                        lb.brightness = std::max(10, lb.brightness - 1);
+                    } else {
+                        // Quick presses: bigger jumps but still smooth
+                        lb.brightness = std::max(10, lb.brightness - 5);
+                    }
                     color_changed = true;
+                    dpad_repeat_counter[idx] = 0;
                 }
             }
-            // LEFT/RIGHT: Color selection (cycle through presets)
+            // LEFT/RIGHT: Color selection (cycle through presets with fade)
             else if (uni_gp->dpad == DPAD_LEFT) {
                 if (prev_dpad[idx] != DPAD_LEFT) {
                     // Cycle to previous color
@@ -512,8 +527,9 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
                     color_changed = true;
                 }
             } else {
-                // No DPAD pressed - reset hold state
+                // No DPAD pressed - reset counters
                 dpad_held[idx] = false;
+                dpad_repeat_counter[idx] = 0;
             }
 
             if (color_changed) {
@@ -523,6 +539,11 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             }
 
             prev_dpad[idx] = uni_gp->dpad;
+
+            // Intercept combo inputs - don't send to host
+            gp_in.buttons &= ~gamepad->MAP_BUTTON_START;
+            gp_in.trigger_r = 0;
+            gp_in.dpad = 0;
         }
 
         // Always update smooth color transitions
