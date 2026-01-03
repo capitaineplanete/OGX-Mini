@@ -517,7 +517,14 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
 	    const int DEADZONE = 400;  // Larger deadzone to avoid drift
 
-
+	    // Initialize previous states when combo first activates (prevents instant color change)
+	    if (!lb.combo_active) {
+		prev_joy_left[idx] = (joy_x < -DEADZONE);
+		prev_joy_right[idx] = (joy_x > DEADZONE);
+		prev_joy_up[idx] = (joy_y < -DEADZONE);
+		prev_joy_down[idx] = (joy_y > DEADZONE);
+		prev_dpad[idx] = uni_gp->dpad;
+	    }
 
 	    // X-axis: LEFT/RIGHT on joystick (only trigger on crossing threshold)
 
@@ -571,7 +578,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
 
 
-	    // DPAD: Smooth HSV color wheel (with repeat delay)
+	    // DPAD: Smooth HSV color wheel (with repeat delay for better control)
 
 	    static uint8_t dpad_repeat_delay[MAX_GAMEPADS] = {0};
 
@@ -579,7 +586,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
 	    if (uni_gp->dpad == DPAD_LEFT) {
 
-		if (prev_dpad[idx] != DPAD_LEFT || dpad_repeat_delay[idx]++ > 10) {
+		if (prev_dpad[idx] != DPAD_LEFT || dpad_repeat_delay[idx]++ > 15) {
 
 		    lb.hue = (lb.hue - 5 + 360) % 360;
 
@@ -591,7 +598,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
             } else if (uni_gp->dpad == DPAD_RIGHT) {
 
-                if (prev_dpad[idx] != DPAD_RIGHT || dpad_repeat_delay[idx]++ > 10) {
+                if (prev_dpad[idx] != DPAD_RIGHT || dpad_repeat_delay[idx]++ > 15) {
 
                     lb.hue = (lb.hue + 5) % 360;
 
@@ -603,7 +610,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
             } else if (uni_gp->dpad == DPAD_UP) {
 
-                if (prev_dpad[idx] != DPAD_UP || dpad_repeat_delay[idx]++ > 10) {
+                if (prev_dpad[idx] != DPAD_UP || dpad_repeat_delay[idx]++ > 15) {
 
                     lb.brightness = std::min(255, lb.brightness + 15);
 
@@ -615,7 +622,7 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
 
             } else if (uni_gp->dpad == DPAD_DOWN) {
 
-                if (prev_dpad[idx] != DPAD_DOWN || dpad_repeat_delay[idx]++ > 10) {
+                if (prev_dpad[idx] != DPAD_DOWN || dpad_repeat_delay[idx]++ > 15) {
 
                     lb.brightness = std::max(10, lb.brightness - 15);
 
@@ -659,8 +666,9 @@ static void controller_data_cb(uni_hid_device_t* device, uni_controller_t* contr
             if (battery_pct < 20 && controller->battery > 0) {
                 set_target_color(idx, 50, 0, 0);  // Dim red for low battery
             } else if (!lb.combo_active) {
+                // Use HSV values that were set during combo mode, not preset array
                 uint8_t r, g, b;
-                calculate_color(idx, r, g, b);
+                hsv_to_rgb(lb.hue, lb.sat, lb.brightness, r, g, b);
                 set_target_color(idx, r, g, b);
             }
 

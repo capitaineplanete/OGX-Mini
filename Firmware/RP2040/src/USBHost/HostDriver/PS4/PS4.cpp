@@ -8,8 +8,9 @@
 
 void PS4Host::initialize(Gamepad& gamepad, uint8_t address, uint8_t instance, const uint8_t* report_desc, uint16_t desc_len)
 {
-    // Initialize prev_in_report_ with neutral DPAD to prevent phantom up arrow
-    // PS4 DPAD: 0x00=UP, 0x08=CENTER. Zero-init would trigger UP, so set CENTER explicitly
+    // Zero entire prev_in_report_ to prevent phantom button presses (R3/L3/etc)
+    // Then set DPAD to CENTER since 0x00=UP would trigger phantom up arrow
+    std::memset(&prev_in_report_, 0, sizeof(PS4::InReport));
     prev_in_report_.buttons[0] = PS4::Buttons0::DPAD_CENTER;
 
     out_report_.report_id = 0x05;
